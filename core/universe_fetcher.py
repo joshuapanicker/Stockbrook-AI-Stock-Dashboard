@@ -60,6 +60,22 @@ def _trim_memory() -> None:
         pass
 
 
+def _rss_mb() -> float | None:
+    """Current resident set size in MB, read straight from the kernel
+    (/proc/self/status) rather than resource.getrusage, whose ru_maxrss is a
+    high-water mark that never falls — useless for seeing whether a cycle's
+    malloc_trim actually gave memory back. Linux-only (Railway); returns
+    None elsewhere so callers can skip logging quietly."""
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return round(int(line.split()[1]) / 1024, 1)
+    except Exception:
+        return None
+    return None
+
+
 _stop_event = threading.Event()
 _thread: threading.Thread | None = None
 _lock = threading.Lock()
@@ -241,6 +257,9 @@ def run_fetch_cycle(symbols: list[str] | None = None, force: bool = False) -> No
         _progress["total"] = len(symbols)
         _progress["fetched"] = 0
 
+    start_rss = _rss_mb()
+    print(f"[universe-fetcher] cycle start: {len(symbols)} symbols, RSS={start_rss} MB", flush=True)
+
     try:
         # Process chunk by chunk in priority order so high-interest symbols
         # land in the cache first: batch price download, then parallel info.
@@ -266,6 +285,11 @@ def run_fetch_cycle(symbols: list[str] | None = None, force: bool = False) -> No
         with _lock:
             _progress["running"] = False
             _progress["last_run"] = time.time()
+        end_rss = _rss_mb()
+        delta_str = ""
+        if start_rss is not None and end_rss is not None:
+            delta_str = f" (delta={end_rss - start_rss:+.1f} MB)"
+        print(f"[universe-fetcher] cycle end: RSS={end_rss} MB{delta_str}", flush=True)
 
 
 def _worker() -> None:
