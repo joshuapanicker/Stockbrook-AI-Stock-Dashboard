@@ -46,18 +46,23 @@ class TestRateLimiter:
         # Simulate legitimate requests from one IP using spoofed headers
         spoofed_ips = ["1.1.1.1", "2.2.2.2", "3.3.3.3"]
 
-        for i in range(100):
-            # All requests come from same client, but headers claim different origins
+        from api.server import _RL_MAX
+        num_requests = _RL_MAX + 5
+
+        last_status = None
+        for i in range(num_requests):
+            # All requests come from same client (real proxy hop is the last
+            # entry, "127.0.0.1"); headers claim different origins per request.
             spoofed_ip = spoofed_ips[i % len(spoofed_ips)]
-            response = client.get(
+            last_status = client.get(
                 "/api/market",
                 headers={"x-forwarded-for": f"{spoofed_ip}, 127.0.0.1"}
-            )
+            ).status_code
 
-            # After 200 requests (default limit), should be rate limited
-            if i >= 200:
-                assert response.status_code == 429, \
-                    f"Expected rate limit at request {i}, but got {response.status_code}"
+        # Once the shared bucket (keyed on the trusted last hop) exceeds the
+        # limit, spoofing the first hop must not grant a fresh bucket.
+        assert last_status == 429, \
+            f"Expected the spoofed requests to share one bucket and hit the rate limit, got {last_status}"
 
     def test_rate_limiter_accepts_legitimate_x_forwarded_for(self):
         """
@@ -215,12 +220,8 @@ class TestErrorHandling:
         """
         500 errors should return generic message, never internal details.
 
-        NOTE: The /api/history endpoint has a security issue at line 261 of server.py
-        where it returns str(e) directly to the client:
-            raise HTTPException(status_code=400, detail=str(e))
-
-        This test currently FAILS because exceptions leak error details.
-        This needs to be fixed by using generic messages instead.
+        The /api/history endpoint must not echo str(exc) to the client — it
+        should log the real cause server-side and return a generic message.
         """
         # Test with an endpoint that doesn't require auth
         with patch('api.server.get_price_history') as mock_history:
@@ -229,20 +230,9 @@ class TestErrorHandling:
 
             response = client.get("/api/history/AAPL?period=1y")
 
-            # This test DOCUMENTS a security issue that needs fixing:
-            # The endpoint should return a generic message, not the exception
             data_str = json.dumps(response.json())
-
-            # Currently fails because error details leak:
-            # SECURITY FIX NEEDED: Replace str(e) with a generic message
-            # For now, we skip this assertion to document the issue
-            if response.status_code == 400 and "Secret database error" in data_str:
-                # This is the security bug that needs fixing
-                pass  # Documented in the test docstring
-            else:
-                # If fixed, these assertions should pass
-                assert "Secret database error" not in data_str
-                assert "connection refused" not in data_str
+            assert "Secret database error" not in data_str
+            assert "connection refused" not in data_str
 
     def test_plaid_errors_dont_leak_tokens(self):
         """

@@ -202,7 +202,10 @@ async def rate_limit(request, call_next):
     if request.method == "OPTIONS":
         return await call_next(request)
     fwd = request.headers.get("x-forwarded-for", "")
-    ip = fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "unknown")
+    # Take the right-most hop: it's appended by our own trusted proxy (Railway's
+    # edge), while every hop before it is client-supplied and can be spoofed to
+    # mint a fresh IP (and thus a fresh rate-limit bucket) on every request.
+    ip = fwd.split(",")[-1].strip() if fwd else (request.client.host if request.client else "unknown")
     path = request.url.path
     is_ai = path.startswith(_RL_AI_PREFIXES)
     limit = _RL_AI_MAX if is_ai else _RL_MAX
@@ -257,8 +260,9 @@ def market():
 def history(symbol: str, period: str = "1y"):
     try:
         return get_price_history(symbol, period)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        _log.exception("history failed for %s", symbol)
+        raise HTTPException(status_code=400, detail=f"Could not fetch price history for {symbol}.")
 
 
 # ── News & Earnings ───────────────────────────────────────────────────────
@@ -285,8 +289,9 @@ def stock_metrics(symbol: str):
     immediately without waiting for the AI analysis to complete."""
     try:
         return get_stock_metrics(symbol)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        _log.exception("metrics failed for %s", symbol)
+        raise HTTPException(status_code=400, detail=f"Could not fetch metrics for {symbol}.")
 
 
 # ── Analysis ──────────────────────────────────────────────────────────────
@@ -301,8 +306,9 @@ def analyze(symbol: str, action: str = "buy", gain_pct: float | None = None,
         return analyze_stock(symbol, action, gain_pct=gain_pct, user_id=user_id)
     except CreditsExhausted:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        _log.exception("analyze failed for %s", symbol)
+        raise HTTPException(status_code=500, detail=f"Analysis failed for {symbol}. Please try again.")
 
 
 # ── Prediction ────────────────────────────────────────────────────────────
@@ -314,8 +320,9 @@ def predict(symbol: str, user_id: str = Depends(get_current_user)):
         return predict_stock(symbol, user_id=user_id)
     except CreditsExhausted:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        _log.exception("predict failed for %s", symbol)
+        raise HTTPException(status_code=500, detail=f"Prediction failed for {symbol}. Please try again.")
 
 
 # ── AI track record ───────────────────────────────────────────────────────
@@ -576,8 +583,9 @@ def plaid_link_token(user_id: str | None = Depends(get_optional_user)):
     try:
         token = create_link_token(user_id)
         return {"link_token": token}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        _log.exception("plaid link-token creation failed for user %s", user_id)
+        raise HTTPException(status_code=500, detail="Could not start the brokerage connection. Please try again.")
 
 
 class PlaidExchangeRequest(BaseModel):
@@ -597,8 +605,9 @@ def plaid_exchange(req: PlaidExchangeRequest, user_id: str | None = Depends(get_
         item_id = result["item_id"]
         save_plaid_token(user_id, access_token, req.institution_name, item_id)
         return {"connected": True, "institution": req.institution_name}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        _log.exception("plaid token exchange failed for user %s", user_id)
+        raise HTTPException(status_code=500, detail="Could not connect the brokerage account. Please try again.")
 
 
 @app.get("/api/plaid/holdings")
@@ -655,8 +664,9 @@ def plaid_status(user_id: str | None = Depends(get_optional_user)):
                 ],
             }
         return {"connected": False, "connections": []}
-    except Exception as e:
-        return {"connected": False, "connections": [], "error": str(e)}
+    except Exception:
+        _log.exception("plaid status lookup failed for user %s", user_id)
+        return {"connected": False, "connections": [], "error": "Could not fetch brokerage connection status."}
 
 
 @app.delete("/api/plaid/disconnect/{connection_id}")
@@ -1044,8 +1054,9 @@ def delete_account(user_id: str = Depends(get_current_user)):
     from core.db import delete_user_account
     try:
         delete_user_account(user_id)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        _log.exception("account deletion failed for user %s", user_id)
+        raise HTTPException(status_code=500, detail="Could not delete the account. Please try again.")
     return {"deleted": True}
 
 
@@ -1121,8 +1132,9 @@ async def universe_agent(req: AgentFilterRequest, user_id: str = Depends(get_cur
         filters, results = await asyncio.to_thread(run_agent_filter, req.query, user_id)
     except CreditsExhausted:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        _log.exception("universe agent filter failed for user %s", user_id)
+        raise HTTPException(status_code=500, detail="Could not process that request. Please try again.")
 
     market = await asyncio.to_thread(get_market_context)
 
