@@ -121,11 +121,30 @@ def _note_rate_limit(seconds: float = 30.0) -> None:
         _backoff_until = max(_backoff_until, time.time() + seconds)
 
 
+# Yahoo periodically breaks yfinance's crumb/cookie handshake (an unresolved,
+# recurring upstream issue — see ranaroussi/yfinance#2404). When it does,
+# EVERY request 401s and yfinance retries internally with no backoff of its
+# own, so without this check the fetcher hammers Yahoo at full speed for a
+# whole cycle (~20 min observed), burning CPU/memory on retries that can
+# never succeed. Treated like a rate limit, but with a much longer cooldown:
+# this condition persists for a long time, unlike a brief 429 spike.
+_AUTH_FAILURE_MARKERS = ("401", "unauthorized", "invalid crumb",
+                         "unable to access this feature")
+
+
+def _is_auth_or_rate_limited(msg: str) -> bool:
+    low = msg.lower()
+    return "429" in low or "too many requests" in low or any(m in low for m in _AUTH_FAILURE_MARKERS)
+
+
 def _fetch_price_batch(symbols: list[str]) -> dict[str, dict]:
     """
     Use yf.download() to get 1-year OHLCV for a batch of symbols at once.
     Returns {symbol: {close, low_52w, high_52w}} — much faster than per-ticker calls.
     """
+    _throttle()  # honor any active backoff before starting this batch
+    if _stop_event.is_set():
+        return {}
     results: dict[str, dict] = {}
     try:
         data = yf.download(
@@ -182,8 +201,9 @@ def _fetch_price_batch(symbols: list[str]) -> dict[str, dict]:
             except Exception:
                 continue
 
-    except Exception:
-        pass
+    except Exception as e:
+        if _is_auth_or_rate_limited(str(e)[:200]):
+            _note_rate_limit(300.0)
 
     return results
 
@@ -226,8 +246,8 @@ def _fetch_one_info(symbol: str, price_data: dict[str, dict]) -> None:
 
     except Exception as e:
         msg = str(e)[:200]
-        if "429" in msg or "Too Many Requests" in msg:
-            _note_rate_limit()
+        if _is_auth_or_rate_limited(msg):
+            _note_rate_limit(300.0)
         # Mark symbol as errored but don't break the cycle
         upsert_stock({"symbol": symbol}, error=msg)
 
