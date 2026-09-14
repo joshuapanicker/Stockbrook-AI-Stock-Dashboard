@@ -1,0 +1,45 @@
+name: AI backtest ledger
+
+# Extends the ai_calls_backtest sample on a schedule, independent of the
+# Railway container — deliberately not run inside the API process (the
+# standing rule from the RAG production incident: heavy/scripted work
+# never shares a process with live traffic). GitHub Actions was picked
+# over a Railway cron service because it needs no new billable service
+# and nothing beyond copying 2 existing values into repo secrets once.
+#
+# One-time setup (Settings -> Secrets and variables -> Actions):
+#   ANTHROPIC_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+# (the same three values already in Railway's environment — nothing new
+# to generate, just copied over).
+#
+# Cost at the default --limit: ~200 calls * $0.0033 =~ $0.66/day,
+# ~$20/month. Change --limit below to tune volume; see
+# docs/rag-and-model-roadmap.md for how this figure was chosen.
+
+on:
+  schedule:
+    - cron: "17 9 * * *"   # 09:17 UTC daily — an off-the-hour time, avoids the
+                           # top-of-hour pile-up other repos' crons queue at
+  workflow_dispatch:        # lets it be run manually from the Actions tab too
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run backtest batch
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SEC_EDGAR_CONTACT: "StockWiz joshua.panicker@gmail.com"
+        run: python scripts/backtest_worker.py --limit 200
