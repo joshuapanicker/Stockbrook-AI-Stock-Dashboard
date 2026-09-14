@@ -73,12 +73,22 @@ _ALL_FIELDS = ["trailing_pe", "forward_pe", "revenue_growth", "earnings_growth",
               "profit_margin", "operating_margin", "distance_to_low_pct",
               "distance_to_high_pct"]
 
-# Buy needs revenue_growth/profit_margin, which only reconstruct within
-# roughly the trailing year (core/point_in_time.py's documented ceiling).
-# Sell only loses one rule (revenue_growth) beyond that, so it can look
-# back years. Both windows require call_date old enough that every horizon
-# (30/90/180 days out) has already elapsed, so results are usable the
-# moment they're written rather than waited on.
+# Both windows require call_date old enough that every horizon (30/90/180
+# days out) has already elapsed, i.e. at least 185 days back — which
+# creates a real tension for buy scenarios: a 25-call validation batch at
+# this exact window found profit_margin missing in 25/25 calls and
+# revenue_growth in 20/25 (core/point_in_time.py has the measured
+# boundary — it's a few months, not the ~12 originally assumed). Two of
+# the buy criteria's five rules (forward_pe permanently, profit_margin in
+# practice) are close to unconditionally False at this window, and a
+# third (revenue_growth) mostly is; a buy backtest here mainly exercises
+# near_52w_low and not_bearish_market, not the full ruleset a live buy
+# analysis sees. Left as-is rather than shrinking the window (that breaks
+# horizon resolution) or fabricating the missing fields — data_gaps
+# records this transparently per call. Sell only loses revenue_growth the
+# same way and keeps the other four rules live, so it's the more complete
+# signal; weight interpretation (and future sampling) accordingly rather
+# than treating buy and sell backtest volume as equally informative.
 _BUY_WINDOW_DAYS = (185, 360)
 _SELL_WINDOW_DAYS = (185, 365 * 4)
 

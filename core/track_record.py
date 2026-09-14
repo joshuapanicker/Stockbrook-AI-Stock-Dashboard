@@ -119,13 +119,26 @@ def _all_calls() -> list[dict]:
 
 def _price_on_or_after(symbol: str, target: date) -> float | None:
     """Closing price on the first trading day on/after `target`, from
-    cached history. None if that date is still in the future."""
+    cached history. None if that date is still in the future.
+
+    The period ladder was written assuming `target` is always recent —
+    true for a live call, whose horizons are at most 180 days past
+    call_date. A backtest call_date can be years in the past, and the old
+    ladder topped out at "2y": for a target older than that, EVERY point
+    in the fetched history sits at or after it, so the loop below always
+    returned the same earliest available price regardless of how much
+    older the target actually was — silently making the 30d/90d/180d
+    returns on an old backtest call identical when they should differ.
+    Caught by that exact symptom on a real backtest row (AMZN sell
+    2023-09-27: all three horizons resolved to 0.4844). "max" covers it.
+    """
     today = datetime.now(timezone.utc).date()
     if target > today:
         return None
     from core.metrics import get_price_history
     days_out = (today - target).days
-    period = "2y" if days_out > 300 else ("1y" if days_out > 25 else "3mo")
+    period = ("max" if days_out > 700 else
+             "2y" if days_out > 300 else "1y" if days_out > 25 else "3mo")
     try:
         hist = get_price_history(symbol, period)
     except Exception:

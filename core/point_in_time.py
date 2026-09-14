@@ -25,10 +25,18 @@ What's reconstructable, and what genuinely isn't (measured 2026-09-13):
     disclosure date (yfinance's `get_earnings_dates`), which goes back
     several years for large/mid caps. Good depth.
   - profit_margin, operating_margin — from `quarterly_income_stmt`'s
-    trailing-twelve-month window, which only ever exposes ~5 quarters
-    relative to *whenever this code runs* (not to the historical date
-    being asked about) — a hard ceiling in yfinance's free data. For an
-    `as_of` older than that window, these come back None.
+    trailing-twelve-month window, which needs FOUR CONSECUTIVE quarters
+    all disclosed by `as_of`, out of the ~5 columns yfinance ever exposes
+    relative to *today* (not to `as_of`). That is a much tighter ceiling
+    than "~12 months" — measured 2026-09-13, MSFT and AAPL stopped
+    qualifying around 140 days back; JPM and KO (calendar fiscal years,
+    vs. Microsoft's/Apple's offset ones) held out to ~300-350 days. The
+    boundary is ticker-dependent and generally under 5 months, not under
+    12. A real backtest batch run at the intended 185-360-day buy window
+    came back with profit_margin and operating_margin missing in 25 of 25
+    calls — at this window, they don't merely degrade with age, they are
+    effectively never available. Left as None rather than papered over;
+    see the worker-design note in scripts/backtest_worker.py.
   - revenue_growth, earnings_growth — single most-recent-quarter vs the
     same quarter a year earlier, matching what Yahoo's live `revenueGrowth`
     / `earningsGrowth` actually measure (verified: reconstructing this way
@@ -43,7 +51,10 @@ What's reconstructable, and what genuinely isn't (measured 2026-09-13):
     against the quarterly definition would misjudge the threshold. The
     single-quarter comparison is what's actually right, and it needs
     exactly the two quarterly columns furthest apart in the 5 available —
-    no extra data source required.
+    no extra data source required. That looser requirement (2 quarters,
+    not 4 consecutive) is why growth survives further into the past than
+    margins do, though still not reliably: the same real backtest batch
+    that found margins missing 25/25 times found growth missing 20/25.
     One disclosed exception: this uses `Total Revenue`, which for banks
     (JPM in testing) reads noticeably lower than Yahoo's own revenue
     figure — financials report revenue differently (net interest income
