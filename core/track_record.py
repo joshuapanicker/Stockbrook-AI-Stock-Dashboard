@@ -26,12 +26,20 @@ so the flow is still testable end to end.
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+_log = logging.getLogger("stockbrook")
+
 HORIZONS: dict[str, int] = {"30d": 30, "90d": 90, "180d": 180}
+
+# Postgres unique-violation code — the one insert failure log_call expects
+# and silently accepts (same symbol+action already logged today). See
+# postgrest.exceptions.APIError.code.
+_DUPLICATE_KEY = "23505"
 
 _LOCAL_PATH = Path(__file__).parent.parent / "data" / "ai_calls.json"
 _local_lock = threading.Lock()
@@ -78,8 +86,14 @@ def log_call(symbol: str, action: str, decision: str, price_at_call: float | Non
     if sb:
         try:
             sb.table("ai_calls").insert(row).execute()
-        except Exception:
-            pass  # already logged today for this symbol+action
+        except Exception as exc:
+            # Only a same-day duplicate for this symbol+action is expected
+            # and silent (the unique constraint doing its job). Anything
+            # else — most importantly the table not existing — must be
+            # visible, or every future verdict disappears the same way this
+            # one did for a month with nothing in the logs to show for it.
+            if getattr(exc, "code", None) != _DUPLICATE_KEY:
+                _log.exception("ai_calls insert failed for %s %s", symbol, action)
         return
     with _local_lock:
         data = _local_read()
