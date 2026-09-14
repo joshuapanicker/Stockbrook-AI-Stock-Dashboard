@@ -83,8 +83,20 @@ def _fetch_submissions(cik: str) -> dict:
 
 
 def get_recent_filings(symbol: str, forms: tuple[str, ...] = ("10-K", "10-Q"),
-                       limit: int = 1) -> list[Filing]:
-    """Most recent filing of each requested form type for a ticker."""
+                       limit: int = 1, as_of: str | None = None) -> list[Filing]:
+    """Most recent filing of each requested form type for a ticker.
+
+    `as_of` (an ISO date string) restricts this to the filing that was
+    actually the most recent one on that date — for backtesting, so a
+    historical analysis is never grounded in a filing that, on the date
+    being simulated, hadn't been published yet. None (the default) keeps
+    today's live behavior: the true most recent filing regardless of date.
+
+    Only searches SEC's `recent` submissions window (last ~1000 filings) —
+    plenty for a public company's quarterly cadence, but an `as_of` older
+    than that window may find nothing rather than reaching into paginated
+    filing history, which isn't fetched here.
+    """
     cik = get_cik(symbol)
     if not cik:
         return []
@@ -95,15 +107,19 @@ def get_recent_filings(symbol: str, forms: tuple[str, ...] = ("10-K", "10-Q"),
     seen: set[str] = set()
     out: list[Filing] = []
     for i, form in enumerate(forms_list):
-        if form in forms and form not in seen:
-            out.append(Filing(
-                form=form,
-                filing_date=recent["filingDate"][i],
-                accession=recent["accessionNumber"][i],
-                primary_doc=recent["primaryDocument"][i],
-                cik=cik,
-            ))
-            seen.add(form)
+        if form not in forms or form in seen:
+            continue
+        filing_date = recent["filingDate"][i]
+        if as_of is not None and filing_date > as_of:
+            continue
+        out.append(Filing(
+            form=form,
+            filing_date=filing_date,
+            accession=recent["accessionNumber"][i],
+            primary_doc=recent["primaryDocument"][i],
+            cik=cik,
+        ))
+        seen.add(form)
         if len(seen) >= len(forms):
             break
     return out
