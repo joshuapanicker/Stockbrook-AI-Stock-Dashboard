@@ -1,9 +1,8 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import clsx from "clsx";
 import {
-  TrendingUp, BarChart2, Bot, Zap, ShieldCheck, ChevronRight,
-  Star, ArrowRight, Eye, EyeOff, Mail, Lock, Loader2,
-  AlertCircle, CheckCircle,
+  TrendingUp, ChevronRight, ArrowRight, Eye, EyeOff, Mail, Lock, Loader2,
+  AlertCircle, CheckCircle, Check,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useInView } from "../hooks/useInView";
@@ -14,139 +13,73 @@ import VerdictCard from "./landing/VerdictCard";
 import PipelineShowcase from "./landing/PipelineShowcase";
 import TrackRecordLedger from "./landing/TrackRecordLedger";
 import TypeWall from "./landing/TypeWall";
-import WireTerrain from "./landing/WireTerrain";
-import IntroLoader from "./landing/IntroLoader";
 import InstrumentsRail, { INSTRUMENTS } from "./landing/InstrumentsRail";
 import AppShowcase from "./landing/AppShowcase";
-import { GlitchText, ScrambleLink, SmoothWheel, SpotlightCard, ScrollFillText } from "./landing/Effects";
-import { DataConstellation, CursorGlow, ScrollProgress, TickerTape, AmbientWashes } from "./landing/Atmosphere";
-
-// ── 3D tilt on hover — cards lean toward the cursor ───────────────────────
-
-function Tilt({ children }: { children: React.ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const reduced = typeof window !== "undefined" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-  function onMove(e: React.MouseEvent) {
-    const el = ref.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const px = (e.clientX - r.left) / r.width - 0.5;
-    const py = (e.clientY - r.top) / r.height - 0.5;
-    el.style.transform =
-      `perspective(700px) rotateY(${px * 7}deg) rotateX(${-py * 7}deg) translateY(-3px)`;
-  }
-  function onLeave() {
-    const el = ref.current;
-    if (el) el.style.transform = "";
-  }
-
-  return (
-    <div ref={ref}
-      onMouseMove={reduced ? undefined : onMove}
-      onMouseLeave={reduced ? undefined : onLeave}
-      className="h-full will-change-transform"
-      style={{ transition: "transform 0.3s ease" }}>
-      {children}
-    </div>
-  );
-}
-
-// ── Magnetic wrapper — buttons lean toward the cursor, spring back ────────
-
-function Magnetic({ children, strength = 0.3 }: { children: React.ReactNode; strength?: number }) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-
-    function onMove(e: MouseEvent) {
-      const r = el!.getBoundingClientRect();
-      const dx = e.clientX - (r.left + r.width / 2);
-      const dy = e.clientY - (r.top + r.height / 2);
-      const dist = Math.hypot(dx, dy);
-      const range = 110;
-      el!.style.transform = dist < range
-        ? `translate(${dx * (1 - dist / range) * strength}px, ${dy * (1 - dist / range) * strength}px)`
-        : "";
-    }
-    window.addEventListener("mousemove", onMove, { passive: true });
-    return () => window.removeEventListener("mousemove", onMove);
-  }, [strength]);
-
-  return (
-    <div ref={ref} className="inline-block will-change-transform"
-      style={{ transition: "transform 0.3s cubic-bezier(0.2, 0.8, 0.3, 1)" }}>
-      {children}
-    </div>
-  );
-}
+import { SpotlightCard, ScrollFillText } from "./landing/Effects";
+import { ScrollProgress, TickerTape } from "./landing/Atmosphere";
 
 // ── Live SPY/VIX micro-ticker (nav) ───────────────────────────────────────
-// First proof the page is alive: real numbers from /api/market, mono voice.
-// Renders nothing until data lands (or if the API is unreachable).
+// The first proof the page is alive: real numbers from /api/market, in the
+// mono voice. Renders nothing until data lands.
 
-function MicroTicker() {
+function MicroTicker({ className = "" }: { className?: string }) {
   const market = useMarket();
   if (!market || market.spy_latest == null) return null;
   const trend = String(market.market_trend ?? "").toLowerCase();
   const up = trend.includes("up");
   const down = trend.includes("down");
   return (
-    <div className="hidden lg:flex items-center gap-3 font-mono text-[11px] tracking-wider text-white/40">
+    <div className={clsx("flex items-center gap-3 font-mono text-[11px] tracking-wider text-white/35", className)}>
       <span>
         SPY{" "}
-        <span className={up ? "text-green" : down ? "text-red" : "text-white/75"}>
+        <span className={up ? "text-green" : down ? "text-red" : "text-white/70"}>
           ${Number(market.spy_latest).toFixed(2)}{up ? " ▲" : down ? " ▼" : ""}
         </span>
       </span>
       <span className="text-white/15">·</span>
       <span>
-        VIX <span className="text-white/75">{market.vix != null ? Number(market.vix).toFixed(1) : "—"}</span>
+        VIX <span className="text-white/70">{market.vix != null ? Number(market.vix).toFixed(1) : "—"}</span>
       </span>
     </div>
   );
 }
 
-// ── Fade-in wrapper — every section arrives its own way ──────────────────
-// Variants beyond the basic slides: "blur" (sharpens out of a haze),
-// "tilt-left"/"tilt-right" (deals in rotated like a card), "zoom" (grows
-// into place), "flip" (swings in on a vertical hinge).
+// ── Scroll reveal ─────────────────────────────────────────────────────────
+// One motion pattern for the whole page. The old version had nine variants
+// (blur / tilt-left / tilt-right / zoom / flip / …) and every section
+// arrived a different way, which reads as a demo of the animation library
+// rather than as a product. A short rise and a fade, always the same, is
+// what makes a page feel composed instead of busy.
 
-type FadeDir = "up" | "left" | "right" | "none" | "blur" | "tilt-left" | "tilt-right" | "zoom" | "flip";
-
-const FADE_HIDDEN: Record<FadeDir, { transform: string; filter?: string }> = {
-  up:           { transform: "translateY(28px)" },
-  left:         { transform: "translateX(-28px)" },
-  right:        { transform: "translateX(28px)" },
-  none:         { transform: "none" },
-  blur:         { transform: "scale(1.05)", filter: "blur(14px)" },
-  "tilt-left":  { transform: "translateX(-44px) rotate(-4deg) scale(0.96)" },
-  "tilt-right": { transform: "translateX(44px) rotate(4deg) scale(0.96)" },
-  zoom:         { transform: "scale(0.86)" },
-  flip:         { transform: "perspective(900px) rotateY(-14deg) translateX(-24px)" },
-};
-
-function FadeIn({ children, delay = 0, direction = "up", className = "" }: {
-  children: React.ReactNode; delay?: number; direction?: FadeDir; className?: string;
+function Reveal({ children, delay = 0, className = "" }: {
+  children: React.ReactNode; delay?: number; className?: string;
 }) {
-  const { ref, inView } = useInView(0.1);
-  const hidden = FADE_HIDDEN[direction];
+  const { ref, inView } = useInView(0.12);
   return (
     <div ref={ref} className={className} style={{
       opacity: inView ? 1 : 0,
-      transform: inView ? "none" : hidden.transform,
-      filter: inView ? "none" : hidden.filter,
-      transition: [
-        `opacity 0.7s ease ${delay}ms`,
-        `transform 0.7s cubic-bezier(0.16, 0.9, 0.24, 1) ${delay}ms`,
-        hidden.filter ? `filter 0.7s ease ${delay}ms` : "",
-      ].filter(Boolean).join(", "),
+      transform: inView ? "none" : "translateY(16px)",
+      transition: `opacity 0.6s ease ${delay}ms, transform 0.6s cubic-bezier(0.16, 0.9, 0.24, 1) ${delay}ms`,
     }}>
       {children}
+    </div>
+  );
+}
+
+// ── Section heading ───────────────────────────────────────────────────────
+// Every section label/title/subtitle pair goes through here, so they cannot
+// drift apart in size, spacing, or color the way they had.
+
+function SectionHead({ label, title, accent, sub }: {
+  label: string; title: string; accent?: string; sub?: string;
+}) {
+  return (
+    <div className="text-center max-w-2xl mx-auto mb-14">
+      <p className="font-mono text-[11px] tracking-[0.24em] text-accent-bright/80 uppercase mb-4">{label}</p>
+      <h2 className="font-bold tracking-tight text-3xl md:text-[2.75rem] leading-[1.12] text-white">
+        {title}{accent && <span className="text-white/40"> {accent}</span>}
+      </h2>
+      {sub && <p className="text-muted text-[15px] leading-relaxed mt-4">{sub}</p>}
     </div>
   );
 }
@@ -224,19 +157,19 @@ function AuthForm({ onOpenTerms, onOpenPrivacy }: { onOpenTerms: () => void; onO
   }
 
   return (
-    <div className="bg-card border border-border/60 rounded-2xl p-6 shadow-2xl w-full max-w-sm backdrop-blur-sm">
-      <div className="flex gap-1 bg-card2 rounded-xl p-1 mb-5">
+    <div className="bg-card border border-border/60 rounded-2xl p-6 shadow-2xl w-full max-w-sm">
+      <div className="flex gap-1 bg-card2 rounded-lg p-1 mb-5">
         {(["signup", "login"] as Mode[]).map(m => (
           <button key={m} onClick={() => { setMode(m); setError(null); setSuccess(null); }}
-            className={clsx("flex-1 py-2 rounded-lg text-sm font-medium transition-colors",
-              mode === m ? "bg-red/15 text-red" : "text-muted hover:text-white")}>
+            className={clsx("flex-1 py-2 rounded-md text-sm font-medium transition-colors",
+              mode === m ? "bg-accent text-bg" : "text-muted hover:text-white")}>
             {m === "signup" ? "Get Started" : "Sign In"}
           </button>
         ))}
       </div>
 
       <button type="button" onClick={handleGoogle} disabled={googleLoading || loading}
-        className="w-full flex items-center justify-center gap-2.5 bg-white hover:bg-white/90 disabled:opacity-60 text-[#1f1f1f] rounded-xl py-2.5 text-sm font-semibold transition-colors mb-4">
+        className="w-full flex items-center justify-center gap-2.5 bg-white hover:bg-white/90 disabled:opacity-60 text-[#1f1f1f] rounded-lg py-2.5 text-sm font-semibold transition-colors mb-4">
         {googleLoading ? <Loader2 size={16} className="animate-spin" /> : (
           <svg width="16" height="16" viewBox="0 0 48 48" aria-hidden="true">
             <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.9 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l5.7-5.7C34.6 6 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z"/>
@@ -255,13 +188,13 @@ function AuthForm({ onOpenTerms, onOpenPrivacy }: { onOpenTerms: () => void; onO
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-3">
-        <div className="flex items-center gap-2 bg-card2 border border-border rounded-xl px-3 py-2.5 focus-within:border-purple/50 transition-colors">
+        <div className="flex items-center gap-2 bg-card2 border border-border rounded-lg px-3 py-2.5 focus-within:border-accent/60 transition-colors">
           <Mail size={13} className="text-muted flex-shrink-0" />
           <input type="email" value={email} onChange={e => setEmail(e.target.value)}
             placeholder="your@email.com" autoComplete="email"
             className="flex-1 bg-transparent text-sm text-white placeholder-muted focus:outline-none" />
         </div>
-        <div className="flex items-center gap-2 bg-card2 border border-border rounded-xl px-3 py-2.5 focus-within:border-purple/50 transition-colors">
+        <div className="flex items-center gap-2 bg-card2 border border-border rounded-lg px-3 py-2.5 focus-within:border-accent/60 transition-colors">
           <Lock size={13} className="text-muted flex-shrink-0" />
           <input type={showPw ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)}
             placeholder={mode === "signup" ? "Min 8 characters" : "Password"}
@@ -272,33 +205,33 @@ function AuthForm({ onOpenTerms, onOpenPrivacy }: { onOpenTerms: () => void; onO
           </button>
         </div>
         {error && (
-          <div className="flex items-start gap-2 bg-red/10 border border-red/20 rounded-xl px-3 py-2">
+          <div className="flex items-start gap-2 bg-red/10 border border-red/20 rounded-lg px-3 py-2">
             <AlertCircle size={13} className="text-red flex-shrink-0 mt-0.5" />
             <p className="text-red text-xs leading-relaxed">{error}</p>
           </div>
         )}
         {success && (
-          <div className="flex items-start gap-2 bg-green/10 border border-green/20 rounded-xl px-3 py-2">
+          <div className="flex items-start gap-2 bg-green/10 border border-green/20 rounded-lg px-3 py-2">
             <CheckCircle size={13} className="text-green flex-shrink-0 mt-0.5" />
             <p className="text-green text-xs leading-relaxed">{success}</p>
           </div>
         )}
         <button type="submit" disabled={loading}
-          className="w-full bg-red/15 hover:bg-red/25 disabled:opacity-50 border border-red/40 text-red rounded-xl py-2.5 text-sm font-semibold transition-colors flex items-center justify-center gap-2">
+          className="w-full bg-accent hover:bg-accent-dim disabled:opacity-50 text-bg rounded-lg py-2.5 text-sm font-semibold transition-colors flex items-center justify-center gap-2">
           {loading
             ? <><Loader2 size={14} className="animate-spin" />{mode === "login" ? "Signing in..." : "Creating account..."}</>
-            : mode === "login" ? "Sign In" : "Create Free Account"}
+            : mode === "login" ? "Sign In" : "Create free account"}
         </button>
       </form>
       <p className="text-center text-[11px] text-muted mt-3">
         {mode === "signup" ? "Already have an account? " : "No account yet? "}
         <button onClick={() => { setMode(mode === "signup" ? "login" : "signup"); setError(null); }}
-          className="text-red hover:underline">
+          className="text-accent-bright hover:underline">
           {mode === "signup" ? "Sign in" : "Sign up free"}
         </button>
       </p>
       {mode === "signup" && (
-        <p className="text-center text-[10px] text-muted/70 mt-2 leading-relaxed">
+        <p className="text-center text-[10px] text-muted/70 mt-3 leading-relaxed">
           By creating an account you agree to our{" "}
           <button type="button" onClick={onOpenTerms} className="text-muted hover:text-white underline">Terms</button>
           {" "}and{" "}
@@ -318,330 +251,259 @@ export default function LandingPage() {
   const [privacyOpen, setPrivacyOpen] = useState(false);
   // The hero's canvas field hands ignited tickers to the verdict card
   const [ignited, setIgnited] = useState<IgnitedTicker | null>(null);
-  // Intro curtain: hero reveals hold at frame 0 until the curtain lifts
-  const [introDone, setIntroDone] = useState(false);
 
   function scrollToAuth() {
     authRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-  };
+  }
 
   return (
-    <div className={clsx("min-h-screen text-white", !introDone && "intro-hold")} style={{ background: "#06080D" }}>
+    <div className="min-h-screen text-white" style={{ background: "#0B0D12" }}>
       <style>{`body { overflow-x: hidden; }`}</style>
 
-      <IntroLoader onReveal={() => setIntroDone(true)} />
-
-      {/* Page-wide atmosphere: scroll-hue washes + the data constellation
-          that runs behind every section, the cursor lens that follows the
-          pointer everywhere, and the scroll progress hairline. The washes
-          travel teal → violet → amber → teal as you move down the page. */}
-      <AmbientWashes />
-      <DataConstellation />
-      <CursorGlow />
+      {/* The only page-wide ambient layer left. The cursor lens, the drifting
+          particle constellation, and the scroll-driven color washes are gone:
+          three canvases and a pointer-tracked gradient competing behind the
+          content is what made every screen feel restless. */}
       <ScrollProgress />
 
-      {/* ── NAV — glass bar with live market pulse ── */}
-      <nav className="relative z-20 flex items-center justify-between px-6 md:px-8 py-4 border-b border-white/[0.06] bg-white/[0.02] backdrop-blur-md">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl border flex items-center justify-center"
-            style={{ background: "linear-gradient(135deg, rgba(255,61,92,0.16), rgba(124,92,255,0.16))", borderColor: "rgba(255,61,92,0.25)" }}>
-            <TrendingUp size={16} className="text-red" />
+      {/* ── NAV ──
+          Three columns in normal flow. The market pulse used to be absolutely
+          positioned at left-1/2, which sat it directly on top of the "Pipeline"
+          link at common widths. */}
+      <nav className="sticky top-0 z-30 flex items-center justify-between gap-6 px-6 md:px-8 py-3.5 border-b border-white/[0.06] bg-[#0B0D12]/85 backdrop-blur-md">
+        <div className="flex items-center gap-2.5 flex-shrink-0">
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-accent/15 border border-accent/30">
+            <TrendingUp size={15} className="text-accent-bright" />
           </div>
-          <span className="text-white font-bold text-lg tracking-tight">Stockbrook</span>
+          <span className="text-white font-semibold text-[15px] tracking-tight">Stockbrook</span>
         </div>
-        <div className="absolute left-1/2 -translate-x-1/2">
-          <MicroTicker />
-        </div>
-        <div className="flex items-center gap-8">
-          <div className="hidden md:flex items-center gap-8 text-sm text-muted font-mono">
-            <ScrambleLink label="Pipeline" href="#features" className="hover:text-white transition-colors" />
-            <ScrambleLink label="Track record" href="#track-record" className="hover:text-white transition-colors" />
-            <ScrambleLink label="Pricing" href="#pricing" className="hover:text-white transition-colors" />
+
+        <MicroTicker className="hidden xl:flex" />
+
+        <div className="flex items-center gap-6 flex-shrink-0">
+          <div className="hidden md:flex items-center gap-6 text-[13px] text-muted">
+            <a href="#product" className="hover:text-white transition-colors">Product</a>
+            <a href="#pipeline" className="hover:text-white transition-colors">How it works</a>
+            <a href="#track-record" className="hover:text-white transition-colors">Track record</a>
+            <a href="#pricing" className="hover:text-white transition-colors">Pricing</a>
           </div>
-          <Magnetic strength={0.25}>
-            <button onClick={scrollToAuth}
-              className="flex items-center gap-2 border rounded-xl px-4 py-2 text-sm font-semibold transition-all text-white hover:text-black"
-              style={{ borderColor: "rgba(255,61,92,0.4)", background: "rgba(255,61,92,0.1)" }}
-              onMouseEnter={e => { e.currentTarget.style.background = "linear-gradient(90deg, #FF3D5C, #FF7A3D)"; }}
-              onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,61,92,0.1)"; }}>
-              Get Started <ArrowRight size={14} />
-            </button>
-          </Magnetic>
+          <button onClick={scrollToAuth}
+            className="bg-accent hover:bg-accent-dim text-bg rounded-lg px-4 py-2 text-[13px] font-semibold transition-colors">
+            Get started
+          </button>
         </div>
       </nav>
 
-      {/* Wheel scrolling is inertial page-wide: input moves a target and
-          the real scroll position eases toward it, so the page glides to a
-          stop and every scroll-driven section inherits the easing. */}
-      <SmoothWheel />
+      {/* ── HERO ── */}
+      <section className="relative flex flex-col overflow-hidden" style={{ minHeight: "calc(100vh - 57px)" }}>
 
-      {/* ── HERO — Act 0: the noise ──
-          Full-viewport stage for the live ticker field. Phase 1 ships the
-          static layer (pure CSS texture + type) so LCP is instant; the
-          canvas field mounts into #ticker-field-root in phase 2 as
-          progressive enhancement. */}
-      <section className="relative z-10 flex flex-col overflow-hidden" style={{ minHeight: "calc(100vh - 65px)" }}>
-
-        {/* Ticker-field stage — CSS texture renders instantly (LCP), the
-            live canvas field mounts over it as progressive enhancement */}
-        <div id="ticker-field-root" aria-hidden className="absolute inset-0 pointer-events-none">
+        {/* The live ticker field stays — it is the one decorative layer that
+            is actually the product's subject matter. Dialed back so it reads
+            as texture behind the type instead of competing with it. */}
+        <div aria-hidden className="absolute inset-0 pointer-events-none opacity-[0.5]">
           <div className="absolute inset-0 landing-grid-texture" />
-          <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 70% 55% at 50% 118%, rgba(255,61,92,0.09), transparent 65%)" }} />
-          <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 45% 35% at 88% -8%, rgba(124,92,255,0.09), transparent 60%)" }} />
+          <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 60% 45% at 50% 8%, rgba(46,230,168,0.09), transparent 62%)" }} />
           <TickerField onIgnite={setIgnited} className="absolute inset-0 w-full h-full" />
         </div>
+        {/* Scrim. The field is the subject matter, but it was running directly
+            under the body copy at full strength — the line about Claude
+            reasoning had ticker rows crossing it. The type sits in a calm
+            pocket; the field stays legible everywhere else. */}
+        <div aria-hidden className="absolute inset-0 pointer-events-none"
+          style={{ background: "radial-gradient(ellipse 46% 42% at 50% 46%, rgba(11,13,18,0.92) 35%, rgba(11,13,18,0) 100%)" }} />
+        <div aria-hidden className="absolute inset-x-0 bottom-0 h-32" style={{ background: "linear-gradient(to bottom, transparent, #0B0D12)" }} />
 
-        {/* The verdict card — where an ignited ticker becomes a decision.
-            Deliberately peripheral: tucked into the corner, scaled down and
-            faded so it reads as ambient proof; hover brings it forward. */}
-        <div
-          className="hidden xl:block absolute right-4 bottom-16 z-10 anim-fade-in opacity-50 hover:opacity-100 transition-opacity duration-300"
-          style={{ transform: "scale(0.72)", transformOrigin: "bottom right" }}
-        >
+        <div className="hidden xl:block absolute right-6 bottom-20 z-10 opacity-60 hover:opacity-100 transition-opacity duration-300"
+          style={{ transform: "scale(0.78)", transformOrigin: "bottom right" }}>
           <VerdictCard ticker={ignited} />
         </div>
 
-        <div className="relative flex-1 flex flex-col items-center justify-center text-center px-6 pt-14 pb-10 max-w-4xl mx-auto w-full">
+        <div className="relative flex-1 flex flex-col items-center justify-center text-center px-6 pt-16 pb-12 max-w-3xl mx-auto w-full">
 
-          <FadeIn direction="up">
-            <div className="inline-flex items-center gap-2.5 border border-white/10 bg-white/[0.03] rounded-full px-4 py-1.5 font-mono text-[11px] tracking-[0.18em] text-white/60 uppercase mb-10 backdrop-blur-sm">
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red opacity-60" />
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red" />
-              </span>
-              Live · reading 5,700 tickers
-            </div>
-          </FadeIn>
-
-          {/* Two voices: the market speaks in mono (letter-staggered in),
-              the judgment lands in Space Grotesk with a drifting signal
-              gradient. */}
-          <h1 className="mb-8">
-            <span className="block font-mono text-xl md:text-2xl tracking-[0.28em] text-red uppercase mb-5" aria-label="5,700 stocks.">
-              {"5,700 stocks.".split("").map((ch, i) => (
-                <span key={i} aria-hidden className="reveal-char" style={{ "--ci": i } as React.CSSProperties}>
-                  {ch === " " ? "\u00A0" : ch}
-                </span>
-              ))}
+          <div className="inline-flex items-center gap-2.5 border border-white/10 bg-white/[0.03] rounded-full px-3.5 py-1.5 font-mono text-[10px] tracking-[0.16em] text-white/55 uppercase mb-10">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green opacity-60" />
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green" />
             </span>
-            <span className="block uppercase tracking-tight text-[2.75rem] sm:text-6xl md:text-8xl leading-[1.02]" aria-label="One verdict.">
-              {/* The judgment rises out of a clipped slot, shearing upright.
-                  Campaign-poster combo: heavy grotesque for the connective
-                  word, high-contrast serif for the impact word \u2014 colors
-                  unchanged, still one continuous violet->blue gradient. */}
-              <span aria-hidden className="reveal-line">
-                <span style={{ "--ld": "480ms" } as React.CSSProperties}>
-                  <span className="font-headline-sans text-gradient-signal">One{"\u00A0"}</span>
-                  <span className="font-headline-serif text-gradient-signal">verdict.</span>
-                </span>
-              </span>
+            Live · reading 5,700 tickers
+          </div>
+
+          {/* Two voices, no serif: the market states its size in mono, the
+              product answers in one heavy line of Inter. */}
+          <h1 className="mb-7">
+            <span className="block font-mono text-sm md:text-base tracking-[0.22em] text-white/45 uppercase mb-5">
+              5,700 stocks.
+            </span>
+            <span className="block font-bold tracking-[-0.03em] text-[3.25rem] sm:text-7xl md:text-[5.5rem] leading-[0.95] text-white">
+              One verdict<span className="text-accent">.</span>
             </span>
           </h1>
 
-          <FadeIn direction="blur" delay={340}>
-            <p className="font-display text-white/55 text-base md:text-lg leading-relaxed max-w-xl mb-10">
-              Live market data, your rules, and <span className="text-purple">Claude reasoning</span> over
-              every position — in plain English, as it streams.
-            </p>
-          </FadeIn>
+          <p className="text-white/55 text-base md:text-[17px] leading-relaxed max-w-xl mb-10">
+            Live market data, your rules, and Claude reasoning over every position —
+            in plain English, as it streams.
+          </p>
 
-          <FadeIn direction="up" delay={440}>
-            <div className="flex items-center justify-center gap-5 flex-wrap">
-              <Magnetic>
-                <button onClick={scrollToAuth}
-                  className="flex items-center gap-2 text-black rounded-xl px-7 py-3.5 text-sm font-bold transition-all hover:brightness-110"
-                  style={{
-                    background: "linear-gradient(90deg, #FF3D5C, #FF7A3D)",
-                    boxShadow: "0 8px 32px rgba(255,61,92,0.35)",
-                  }}>
-                  Start for free <ArrowRight size={15} />
-                </button>
-              </Magnetic>
-              <button onClick={() => document.getElementById("features")?.scrollIntoView({ behavior: "smooth" })}
-                className="flex items-center gap-2 font-mono text-xs tracking-wider text-muted hover:text-red uppercase transition-colors">
-                How a verdict gets made <ChevronRight size={13} />
-              </button>
-            </div>
-          </FadeIn>
+          <div className="flex items-center justify-center gap-4 flex-wrap">
+            <button onClick={scrollToAuth}
+              className="flex items-center gap-2 bg-accent hover:bg-accent-dim text-bg rounded-lg px-6 py-3 text-sm font-semibold transition-colors">
+              Start for free <ArrowRight size={15} />
+            </button>
+            <button onClick={() => document.getElementById("product")?.scrollIntoView({ behavior: "smooth" })}
+              className="flex items-center gap-1.5 text-sm text-white/60 hover:text-white transition-colors px-2 py-3">
+              See it in action <ChevronRight size={14} />
+            </button>
+          </div>
         </div>
 
-        {/* Proof strip — three true numbers, mono voice. Replaces the old
-            inventory stats card ("4 presets / 6 chart types"). */}
-        <FadeIn direction="up" delay={560}>
-          <div className="relative flex flex-wrap items-center justify-center gap-x-8 gap-y-2 px-6 pb-12 font-mono text-[11px] md:text-xs tracking-[0.14em] text-white/40 uppercase">
-            <span><span className="text-white/85">5,700+</span> US listings scanned</span>
-            <span className="hidden md:inline text-white/15">·</span>
-            <span><span className="text-white/85">200K</span> free AI tokens / mo</span>
-            <span className="hidden md:inline text-white/15">·</span>
-            <span>Every verdict graded at <span className="text-white/85">30/90/180d</span></span>
-          </div>
-        </FadeIn>
+        {/* Proof strip — three true numbers, mono voice */}
+        <div className="relative flex flex-wrap items-center justify-center gap-x-8 gap-y-2 px-6 pb-10 font-mono text-[11px] tracking-[0.1em] text-white/35 uppercase">
+          <span><span className="text-white/70">5,700+</span> US listings scanned</span>
+          <span className="hidden md:inline text-white/15">·</span>
+          <span><span className="text-white/70">200K</span> free AI tokens / mo</span>
+          <span className="hidden md:inline text-white/15">·</span>
+          <span>Every verdict graded at <span className="text-white/70">30/90/180d</span></span>
+        </div>
       </section>
 
-      {/* ── THE TAPE — the market runs through the page, faces attached ── */}
       <TickerTape logos />
 
-      {/* ── THE PIPELINE — scroll-scrubbed 4-act sequence ── */}
-      <section id="features" className="relative z-10">
+      {/* ── THE PRODUCT — the demo reel, promoted to right after the hero.
+             It is the most credible thing on the page; it was buried below
+             two full scroll sequences. ── */}
+      <div id="product">
+        <AppShowcase />
+      </div>
+
+      {/* ── HOW IT WORKS — scroll-scrubbed 4-act sequence ── */}
+      <section id="pipeline" className="relative">
         <PipelineShowcase />
       </section>
 
-      {/* ── THE TERMINAL — the live demo reel IS the product shot now:
-             "Where the verdicts land." pinned over the scroll-scrubbed
-             recording of Dashboard → Portfolio → Market Chat ── */}
-      <AppShowcase />
-
-      {/* ── THE VERDICT WALL — giant type interlude, scroll-sheared ── */}
+      {/* ── THE VERDICT WALL ── */}
       <TypeWall />
 
-      {/* ── GRADED IN PUBLIC — the fill pours in as you arrive ── */}
-      <div className="relative z-10 overflow-hidden py-8 md:py-12">
+      <div className="relative overflow-hidden py-10 md:py-14">
         <ScrollFillText
           text="GRADED IN PUBLIC"
-          className="text-center text-[9vw] leading-none tracking-tight"
+          className="text-center text-[7vw] leading-none tracking-[-0.02em] font-bold"
         />
       </div>
 
-      {/* ── TRACK RECORD — real public scoreboard, honest by design ── */}
+      {/* ── TRACK RECORD ── */}
       <TrackRecordLedger />
 
-      {/* ── INSTRUMENTS ──
-          Desktop: the pinned sideways rail (scroll scrubs it horizontally).
-          Mobile: stacked cards dealing in from alternating angles — pinned
-          horizontal scroll fights native touch scrolling, so it stays off. */}
+      {/* ── INSTRUMENTS ── */}
       <div className="hidden lg:block">
         <InstrumentsRail />
       </div>
-      <section className="relative z-10 px-8 py-16 max-w-7xl mx-auto lg:hidden">
-        <FadeIn direction="blur">
-          <div className="text-center mb-12">
-            <p className="font-mono text-[11px] tracking-[0.28em] text-purple uppercase mb-3"><GlitchText text="Instruments" /></p>
-            <h2 className="font-display font-bold tracking-tight text-4xl md:text-5xl text-white">
-              Six instruments, <span className="text-gradient-heat">one terminal.</span>
-            </h2>
-          </div>
-        </FadeIn>
+      <section className="relative px-6 py-20 max-w-7xl mx-auto lg:hidden">
+        <Reveal>
+          <SectionHead label="Instruments" title="Six instruments," accent="one terminal." />
+        </Reveal>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {INSTRUMENTS.map(({ icon: Icon, title, desc }, i) => {
-            const entrance: ("tilt-left" | "tilt-right")[] = ["tilt-left", "tilt-right"];
-            const heat = i % 2 === 0;
-            const accent = heat ? "#FF5C7A" : "#8055F5";
-            const spotColor = heat ? "rgba(255,61,92,0.12)" : "rgba(124,92,255,0.14)";
-            return (
-              <FadeIn key={title} direction={entrance[i % 2]} delay={(i % 2) * 80}>
-                <Tilt>
-                  <SpotlightCard color={spotColor} className="glass-card border border-white/[0.07] rounded-2xl p-5 transition-colors group h-full">
-                    <div className="w-9 h-9 rounded-xl border flex items-center justify-center mb-4 transition-colors"
-                      style={{ color: accent, borderColor: `${accent}33`, background: `${accent}1A` }}>
-                      <Icon size={17} />
-                    </div>
-                    <p className="font-mono text-xs tracking-[0.12em] uppercase text-white mb-2">{title}</p>
-                    <p className="text-muted text-xs leading-relaxed">{desc}</p>
-                  </SpotlightCard>
-                </Tilt>
-              </FadeIn>
-            );
-          })}
+          {INSTRUMENTS.map(({ icon: Icon, title, desc }, i) => (
+            <Reveal key={title} delay={(i % 2) * 70}>
+              <SpotlightCard className="glass-card border border-white/[0.07] rounded-xl p-5 h-full">
+                <div className="w-9 h-9 rounded-lg border border-accent/25 bg-accent/10 text-accent-bright flex items-center justify-center mb-4">
+                  <Icon size={17} />
+                </div>
+                <p className="font-mono text-[11px] tracking-[0.1em] uppercase text-white mb-2">{title}</p>
+                <p className="text-muted text-[13px] leading-relaxed">{desc}</p>
+              </SpotlightCard>
+            </Reveal>
+          ))}
         </div>
       </section>
 
       {/* ── PRICING ── */}
-      <section id="pricing" className="relative z-10 px-8 py-20 max-w-7xl mx-auto">
-        <FadeIn direction="blur">
-          <div className="text-center mb-12">
-            <p className="font-mono text-[11px] tracking-[0.28em] text-sky uppercase mb-3"><GlitchText text="Pricing" /></p>
-            <h2 className="font-display font-bold tracking-tight text-4xl md:text-5xl text-white">
-              Simple pricing, <span className="text-gradient-signal">no surprises.</span>
-            </h2>
-          </div>
-        </FadeIn>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl mx-auto">
-          <FadeIn direction="flip" delay={0}>
-            <div className="bg-card rounded-2xl p-6 h-full" style={{ border: "1px solid rgba(255,61,92,0.28)" }}>
-              <p className="text-white font-bold text-lg mb-1">Free</p>
-              <p className="text-3xl font-mono font-black text-white mb-1">$0<span className="text-muted text-sm font-normal">/mo</span></p>
-              <p className="font-mono text-[10px] tracking-wider text-muted uppercase mb-5">200K AI tokens/mo · own key = unlimited</p>
-              <div className="space-y-2 mb-6">
+      <section id="pricing" className="relative px-6 py-24 max-w-7xl mx-auto">
+        <Reveal>
+          <SectionHead label="Pricing" title="Free while it earns" accent="your trust." />
+        </Reveal>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 max-w-3xl mx-auto items-start">
+          <Reveal>
+            <div className="bg-card border border-accent/30 rounded-xl p-6 h-full relative">
+              <div className="absolute -top-2.5 left-6 bg-accent text-bg text-[10px] font-semibold px-2 py-0.5 rounded">
+                Current plan
+              </div>
+              <p className="text-white font-semibold mb-1 mt-1">Free</p>
+              <p className="text-4xl font-mono font-bold text-white mb-1">$0<span className="text-muted text-sm font-normal">/mo</span></p>
+              <p className="font-mono text-[10px] tracking-wider text-muted uppercase mb-6">200K AI tokens/mo · own key = unlimited</p>
+              <div className="space-y-2.5 mb-7">
                 {["Stock Search Engine (5,700+ US stocks)", "AI criteria builder + presets", "Portfolio tracker with P&L", "Live market data", "Volume Profile charts", "AI analysis + chat"].map(f => (
-                  <div key={f} className="flex items-center gap-2 text-xs text-white/70">
-                    <div className="w-4 h-4 rounded-full bg-green/15 flex items-center justify-center flex-shrink-0">
-                      <CheckCircle size={9} className="text-green" />
-                    </div>{f}
+                  <div key={f} className="flex items-start gap-2.5 text-[13px] text-white/70">
+                    <Check size={14} className="text-green flex-shrink-0 mt-0.5" />{f}
                   </div>
                 ))}
               </div>
               <button onClick={scrollToAuth}
-                className="w-full text-black rounded-xl py-2.5 text-sm font-semibold transition-all hover:brightness-110"
-                style={{ background: "linear-gradient(90deg, #FF3D5C, #FF7A3D)" }}>
+                className="w-full bg-accent hover:bg-accent-dim text-bg rounded-lg py-2.5 text-sm font-semibold transition-colors">
                 Get started free
               </button>
             </div>
-          </FadeIn>
-          <FadeIn direction="flip" delay={140}>
-            <div className="bg-card border border-border/40 rounded-2xl p-6 h-full relative overflow-hidden">
-              <div className="absolute top-4 right-4 bg-purple/20 text-purple-300 text-[10px] font-semibold px-2 py-0.5 rounded-full border border-purple/30">Coming soon</div>
-              <p className="text-white font-bold text-lg mb-1">Pro</p>
-              <p className="text-3xl font-mono font-black text-white mb-1">$12<span className="text-muted text-sm font-normal">/mo</span></p>
-              <p className="text-muted text-xs mb-5">For serious investors</p>
-              <div className="space-y-2 mb-6">
+          </Reveal>
+          <Reveal delay={90}>
+            <div className="bg-card border border-border/50 rounded-xl p-6 h-full">
+              <div className="flex items-center justify-between mb-1 mt-1">
+                <p className="text-white font-semibold">Pro</p>
+                <span className="text-muted text-[10px] font-medium px-2 py-0.5 rounded border border-border">Coming soon</span>
+              </div>
+              <p className="text-4xl font-mono font-bold text-white/50 mb-1">$12<span className="text-muted text-sm font-normal">/mo</span></p>
+              <p className="font-mono text-[10px] tracking-wider text-muted uppercase mb-6">For serious investors</p>
+              <div className="space-y-2.5 mb-7">
                 {["Everything in Free", "Price & criteria alerts (email)", "Backtesting engine", "News & earnings injection", "Priority AI analysis"].map(f => (
-                  <div key={f} className="flex items-center gap-2 text-xs text-white/50">
-                    <div className="w-4 h-4 rounded-full bg-purple/15 flex items-center justify-center flex-shrink-0">
-                      <ChevronRight size={9} className="text-purple-400" />
-                    </div>{f}
+                  <div key={f} className="flex items-start gap-2.5 text-[13px] text-white/45">
+                    <Check size={14} className="text-muted flex-shrink-0 mt-0.5" />{f}
                   </div>
                 ))}
               </div>
-              <button disabled className="w-full bg-white/5 text-muted rounded-xl py-2.5 text-sm font-semibold cursor-not-allowed">Notify me</button>
+              <button disabled className="w-full bg-white/5 text-muted rounded-lg py-2.5 text-sm font-semibold cursor-not-allowed">
+                Notify me
+              </button>
             </div>
-          </FadeIn>
+          </Reveal>
         </div>
       </section>
 
-      {/* ── CTA + AUTH — the noise returns, quietly, behind the form ── */}
-      <section ref={authRef} className="relative z-10 px-8 py-20 max-w-7xl mx-auto">
-        <FadeIn direction="zoom">
-          <div className="relative overflow-hidden rounded-3xl px-8 py-14 text-center"
-            style={{
-              background: "linear-gradient(135deg, rgba(255,61,92,0.07), rgba(10,6,10,0.4) 45%, rgba(124,92,255,0.09))",
-              border: "1px solid rgba(255,61,92,0.18)",
-            }}>
-            <div aria-hidden className="absolute inset-0 landing-grid-texture opacity-50 pointer-events-none" />
-            {/* The wire terrain bows away from the cursor behind the form */}
-            <WireTerrain className="absolute inset-0" />
-            <div className="relative">
-              <h2 className="font-display font-bold tracking-tight text-4xl md:text-5xl text-white mb-3 leading-tight">
+      {/* ── CTA + AUTH ── */}
+      <section ref={authRef} className="relative px-6 py-24 max-w-7xl mx-auto">
+        <Reveal>
+          <div className="relative overflow-hidden rounded-2xl border border-white/[0.08] px-8 py-16"
+            style={{ background: "linear-gradient(160deg, rgba(46,230,168,0.06), rgba(11,13,18,0) 55%)" }}>
+            <div aria-hidden className="absolute inset-0 landing-grid-texture opacity-40 pointer-events-none" />
+            <div className="relative flex flex-col items-center">
+              <h2 className="font-bold tracking-tight text-3xl md:text-[2.75rem] leading-[1.12] text-white mb-4 text-center max-w-2xl">
                 The market never stops talking.
-                <span className="block text-gradient-signal mt-1">Hear what matters.</span>
+                <span className="block text-white/40">Hear what matters.</span>
               </h2>
-              <p className="text-muted mb-10 max-w-md mx-auto text-sm">
+              <p className="text-muted mb-10 max-w-md mx-auto text-[15px] text-center">
                 Free account, 200K AI tokens a month, every verdict graded in public.
               </p>
-              <div className="flex justify-center">
-                <AuthForm onOpenTerms={() => setTermsOpen(true)} onOpenPrivacy={() => setPrivacyOpen(true)} />
-              </div>
+              <AuthForm onOpenTerms={() => setTermsOpen(true)} onOpenPrivacy={() => setPrivacyOpen(true)} />
             </div>
           </div>
-        </FadeIn>
+        </Reveal>
       </section>
 
-      {/* ── THE TAPE, again — but hot: the editorial red band ── */}
-      <TickerTape hot />
+      <TickerTape />
 
       {/* ── FOOTER ── */}
-      <footer className="relative z-10 border-t border-border/20 px-8 py-8">
-        <div className="max-w-7xl mx-auto flex items-center justify-between flex-wrap gap-4">
+      <footer className="relative border-t border-white/[0.06] px-6 md:px-8 py-8">
+        <div className="max-w-7xl mx-auto flex items-center justify-between flex-wrap gap-5">
           <div className="flex items-center gap-5">
             <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-lg flex items-center justify-center"
-                style={{ background: "linear-gradient(135deg, rgba(255,61,92,0.16), rgba(124,92,255,0.16))" }}>
-                <TrendingUp size={12} className="text-red" />
+              <div className="w-6 h-6 rounded-md flex items-center justify-center bg-accent/15 border border-accent/25">
+                <TrendingUp size={12} className="text-accent-bright" />
               </div>
               <span className="text-white font-semibold text-sm">Stockbrook</span>
             </div>
-            <MicroTicker />
+            <MicroTicker className="hidden sm:flex" />
           </div>
-          <p className="text-muted text-xs">© 2026 Stockbrook · Not financial, investment, or tax advice. For informational purposes only. Past performance does not guarantee future results.</p>
+          <p className="text-muted text-[11px] max-w-xl leading-relaxed">
+            © 2026 Stockbrook · Not financial, investment, or tax advice. For informational purposes only.
+            Past performance does not guarantee future results.
+          </p>
           <div className="flex gap-6 text-xs text-muted">
             <button onClick={() => setPrivacyOpen(true)} className="hover:text-white transition-colors">Privacy</button>
             <button onClick={() => setTermsOpen(true)} className="hover:text-white transition-colors">Terms</button>

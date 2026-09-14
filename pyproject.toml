@@ -1,5 +1,5 @@
 [project]
-name = "stockwiz"
+name = "stockbrook"
 version = "0.1.0"
 description = "Stock screening and analysis tool with Claude AI"
 readme = "README.md"

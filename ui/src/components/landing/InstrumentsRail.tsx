@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Bot, Zap, BarChart2, TrendingUp, ShieldCheck, Star } from "lucide-react";
-import { GlitchText, SpotlightCard } from "./Effects";
+import { SpotlightCard } from "./Effects";
 
 /**
  * The instruments rail — a sideways journey. The section pins while you
@@ -67,55 +67,51 @@ export default function InstrumentsRail() {
 
   return (
     <section ref={sectionRef} className="relative z-10" style={{ height: "280vh" }}>
-      <div className="sticky top-0 h-screen flex flex-col justify-center overflow-hidden">
+      <div className="sticky top-0 h-screen flex flex-col justify-center overflow-hidden pt-14">
 
         <div className="px-8 mb-10 max-w-7xl mx-auto w-full">
-          <p className="font-mono text-[11px] tracking-[0.28em] text-purple uppercase mb-3"><GlitchText text="Instruments" /></p>
-          <h2 className="font-display font-bold tracking-tight text-4xl md:text-5xl text-white">
-            Six instruments, <span className="text-gradient-heat">one terminal.</span>
+          <p className="font-mono text-[11px] tracking-[0.24em] text-accent-bright/80 uppercase mb-4">Instruments</p>
+          <h2 className="font-bold tracking-tight text-3xl md:text-[2.75rem] leading-[1.12] text-white">
+            Six instruments, <span className="text-white/40">one terminal.</span>
           </h2>
         </div>
 
         {/* The rail — scroll scrubs it sideways */}
         <div ref={trackRef} className="flex gap-5 px-8 will-change-transform w-max">
-          {INSTRUMENTS.map(({ icon: Icon, title, desc }, i) => {
-            const heat = i % 2 === 0;
-            const accent = heat ? "#FF5C7A" : "#8055F5";
-            const spotColor = heat ? "rgba(255,61,92,0.12)" : "rgba(124,92,255,0.14)";
-            return (
-              <SpotlightCard key={title} color={spotColor}
-                className="glass-card border border-white/[0.07] rounded-3xl p-7 w-[380px] flex-shrink-0 flex flex-col justify-between min-h-[300px]">
-                {/* Track number — giant, outlined, the rail's own type moment */}
-                <span aria-hidden className="font-display font-black text-[84px] leading-none block select-none"
-                  style={{ WebkitTextStroke: `1.5px ${accent}66`, color: "transparent" }}>
-                  {String(i + 1).padStart(2, "0")}
-                </span>
-                <div>
-                  <div className="w-10 h-10 rounded-xl border flex items-center justify-center mb-4"
-                    style={{ color: accent, borderColor: `${accent}33`, background: `${accent}1A` }}>
-                    <Icon size={18} />
-                  </div>
-                  <p className="font-mono text-sm tracking-[0.12em] uppercase text-white mb-2">{title}</p>
-                  <p className="text-muted text-sm leading-relaxed">{desc}</p>
+          {/* One accent for all six. The rail used to alternate red/violet
+              card by card, which made six equal features look like two
+              competing categories. */}
+          {INSTRUMENTS.map(({ icon: Icon, title, desc }, i) => (
+            <SpotlightCard key={title}
+              className="glass-card border border-white/[0.07] rounded-2xl p-7 w-[380px] flex-shrink-0 flex flex-col justify-between min-h-[300px]">
+              {/* Track number — outlined, the rail's own type moment */}
+              <span aria-hidden className="font-bold text-[76px] leading-none block select-none text-white/[0.07]">
+                {String(i + 1).padStart(2, "0")}
+              </span>
+              <div>
+                <div className="w-10 h-10 rounded-lg border border-accent/25 bg-accent/10 text-accent-bright flex items-center justify-center mb-4">
+                  <Icon size={18} />
                 </div>
-              </SpotlightCard>
-            );
-          })}
+                <p className="font-mono text-[13px] tracking-[0.1em] uppercase text-white mb-2">{title}</p>
+                <p className="text-muted text-sm leading-relaxed">{desc}</p>
+              </div>
+            </SpotlightCard>
+          ))}
           {/* Terminal card — the rail resolves into the CTA */}
-          <div className="rounded-3xl p-7 w-[300px] flex-shrink-0 flex flex-col items-start justify-center border"
-            style={{ background: "linear-gradient(135deg, rgba(255,61,92,0.1), rgba(124,92,255,0.1))", borderColor: "rgba(255,61,92,0.25)" }}>
-            <p className="font-display font-bold text-2xl text-white leading-snug mb-3">
+          <div className="rounded-2xl p-7 w-[300px] flex-shrink-0 flex flex-col items-start justify-center border border-accent/25"
+            style={{ background: "linear-gradient(150deg, rgba(46,230,168,0.11), rgba(11,13,18,0))" }}>
+            <p className="font-bold text-2xl text-white leading-snug mb-3 tracking-tight">
               All of it, in one dark terminal.
             </p>
-            <p className="font-mono text-[11px] tracking-[0.2em] uppercase text-red">Scroll on ↓</p>
+            <p className="font-mono text-[11px] tracking-[0.18em] uppercase text-accent-bright">Scroll on ↓</p>
           </div>
         </div>
 
         {/* Progress hairline */}
         <div className="px-8 mt-10 max-w-7xl mx-auto w-full">
           <div className="h-px bg-white/10 overflow-hidden rounded">
-            <div ref={barRef} className="h-full origin-left"
-              style={{ transform: "scaleX(0)", background: "linear-gradient(90deg, #FF3D5C, #FF7A3D 45%, #7C5CFF)" }} />
+            <div ref={barRef} className="h-full origin-left bg-accent"
+              style={{ transform: "scaleX(0)" }} />
           </div>
         </div>
       </div>

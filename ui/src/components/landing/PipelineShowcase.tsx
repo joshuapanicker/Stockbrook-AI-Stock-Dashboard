@@ -200,7 +200,7 @@ function ReasoningCard({ p }: { p: number }) {
             const on = p > 0.1 + i * 0.07;
             return (
               <span key={c.form}
-                className="inline-flex items-center gap-1.5 border border-purple/30 bg-purple/10 rounded-md px-2 py-1 font-mono text-[9px] tracking-wider text-purple transition-all duration-300"
+                className="inline-flex items-center gap-1.5 border border-accent/30 bg-accent/10 rounded-md px-2 py-1 font-mono text-[9px] tracking-wider text-accent-bright transition-all duration-300"
                 style={{ opacity: on ? 1 : 0, transform: on ? "none" : "translateX(-10px)" }}>
                 {c.form} · {c.section.toUpperCase()}
               </span>
@@ -211,9 +211,9 @@ function ReasoningCard({ p }: { p: number }) {
         {/* Streaming reasoning — scrubbed by scroll */}
         <p className="text-[15px] leading-relaxed text-white/85 min-h-[110px]">
           {REASONING_TEXT.slice(0, chars)}
-          {typing && <span className="inline-block w-[8px] h-[17px] bg-purple ml-0.5 align-middle" />}
+          {typing && <span className="inline-block w-[8px] h-[17px] bg-accent ml-0.5 align-middle" />}
         </p>
-        <p className="font-mono text-[9px] tracking-[0.18em] text-purple/70 uppercase mt-2 text-right">
+        <p className="font-mono text-[9px] tracking-[0.18em] text-accent-bright/70 uppercase mt-2 text-right">
           — Claude · grounded in SEC filings
         </p>
       </div>
@@ -311,9 +311,9 @@ export default function PipelineShowcase() {
 
   const header = (
     <div className="text-center mb-4">
-      <p className="font-mono text-[11px] tracking-[0.28em] text-sky uppercase mb-3">The pipeline</p>
-      <h2 className="font-display font-bold tracking-tight text-4xl md:text-5xl text-white">
-        How a verdict <span className="text-gradient-signal">gets made.</span>
+      <p className="font-mono text-[11px] tracking-[0.24em] text-accent-bright/80 uppercase mb-4">The pipeline</p>
+      <h2 className="font-bold tracking-tight text-3xl md:text-[2.75rem] leading-[1.12] text-white">
+        How a verdict <span className="text-white/40">gets made.</span>
       </h2>
     </div>
   );

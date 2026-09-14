@@ -192,13 +192,13 @@ export default function VerdictCard({ ticker, className = "" }: {
             <p className="text-[13.5px] leading-relaxed text-white/80">
               {script.reasoning.slice(0, typedChars)}
               {phase === "reasoning" && (
-                <span className="inline-block w-[7px] h-[15px] bg-purple ml-0.5 align-middle animate-pulse motion-reduce:animate-none" />
+                <span className="inline-block w-[7px] h-[15px] bg-accent ml-0.5 align-middle animate-pulse motion-reduce:animate-none" />
               )}
             </p>
           )}
         </div>
         {(phase === "reasoning" || phase === "verdict") && (
-          <p className="font-mono text-[9px] tracking-[0.18em] text-purple/70 uppercase mt-1 text-right">
+          <p className="font-mono text-[9px] tracking-[0.18em] text-accent-bright/70 uppercase mt-1 text-right">
             — Claude · streamed
           </p>
         )}

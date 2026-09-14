@@ -1,21 +1,24 @@
 import { useEffect, useState } from "react";
 
 /**
- * Intro loader — the curtain before the dashboard. Plain black screen,
- * the StockWiz spark mark draws itself on in neon heat (same gradient as
- * the primary CTA), "STOCKWIZ" staggers in beneath it in the mono badge
- * voice, then the whole curtain wipes upward and hands the page over.
+ * Intro loader — the curtain before the page. Black screen, the Stockbrook
+ * mark draws itself on, "STOCKBROOK" staggers in beneath it in the mono
+ * badge voice, then the curtain wipes upward and hands the page over.
+ *
+ * Retinted to the terminal blue that now carries the brand — it used to
+ * draw in the red→orange "heat" gradient, which was the same color the
+ * interface uses to mean "you lost money".
  *
  * Timeline (ms):
  *    0 — mark begins drawing (stroke-dashoffset)
  *  650 — wordmark letters start staggering in
- * 1550 — curtain wipe starts; onReveal() fires so the hero can start
+ * 1550 — curtain wipe starts; onReveal() fires so the page can start
  * 2150 — overlay unmounts
  *
  * prefers-reduced-motion: skips entirely (onReveal immediately, no overlay).
  */
 
-const WORD = "STOCKWIZ";
+const WORD = "STOCKBROOK";
 
 export default function IntroLoader({ onReveal }: { onReveal: () => void }) {
   const [phase, setPhase] = useState<"draw" | "wipe" | "gone">("draw");
@@ -53,27 +56,27 @@ export default function IntroLoader({ onReveal }: { onReveal: () => void }) {
         willChange: "transform",
       }}
     >
-      {/* The spark mark — draws on in heat, glowing */}
+      {/* The mark — draws on, glowing */}
       <svg
         width="76" height="76" viewBox="0 0 24 24" fill="none"
-        style={{ filter: "drop-shadow(0 0 14px rgba(255,61,92,0.55)) drop-shadow(0 0 34px rgba(255,122,61,0.3))" }}
+        style={{ filter: "drop-shadow(0 0 14px rgba(46,230,168,0.5)) drop-shadow(0 0 34px rgba(46,230,168,0.22))" }}
       >
         <defs>
-          <linearGradient id="intro-heat" x1="0" y1="1" x2="1" y2="0">
-            <stop offset="0%" stopColor="#FF3D5C" />
-            <stop offset="100%" stopColor="#FF7A3D" />
+          <linearGradient id="intro-mark" x1="0" y1="1" x2="1" y2="0">
+            <stop offset="0%" stopColor="#1FC48D" />
+            <stop offset="100%" stopColor="#5BF0C0" />
           </linearGradient>
         </defs>
         <polyline
           points="2 17 8.5 10.5 13.5 15.5 22 7"
-          stroke="url(#intro-heat)" strokeWidth="1.8"
+          stroke="url(#intro-mark)" strokeWidth="1.8"
           strokeLinecap="round" strokeLinejoin="round"
           className="intro-draw"
           style={{ ["--len" as string]: 32 }}
         />
         <polyline
           points="16 7 22 7 22 13"
-          stroke="url(#intro-heat)" strokeWidth="1.8"
+          stroke="url(#intro-mark)" strokeWidth="1.8"
           strokeLinecap="round" strokeLinejoin="round"
           className="intro-draw"
           style={{ ["--len" as string]: 13, animationDelay: "0.55s" }}
@@ -82,7 +85,7 @@ export default function IntroLoader({ onReveal }: { onReveal: () => void }) {
 
       {/* Wordmark — the badge voice, letter-staggered */}
       <p className="font-mono text-[12px] tracking-[0.42em] uppercase mt-6 ml-[0.42em]"
-        style={{ color: "#FF5C7A", textShadow: "0 0 18px rgba(255,92,122,0.5)" }}>
+        style={{ color: "#5BF0C0", textShadow: "0 0 18px rgba(46,230,168,0.45)" }}>
         {WORD.split("").map((ch, i) => (
           <span key={i} className="intro-char" style={{ ["--ci" as string]: i }}>{ch}</span>
         ))}

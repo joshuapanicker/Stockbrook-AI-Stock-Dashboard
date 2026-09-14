@@ -1,5 +1,5 @@
 """
-Comprehensive security tests for StockWiz/Stockbrook backend.
+Comprehensive security tests for Stockbrook backend.
 
 Tests cover:
 - Rate Limiter Fix (x-forwarded-for spoofing prevention)

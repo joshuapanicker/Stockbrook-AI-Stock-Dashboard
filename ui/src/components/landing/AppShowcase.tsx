@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { Monitor } from "lucide-react";
-import { GlitchText } from "./Effects";
 import { useIsMobile } from "../../hooks/useIsMobile";
 
 /**
@@ -25,10 +24,15 @@ import { useIsMobile } from "../../hooks/useIsMobile";
  * and loops — the demo actually moves instead of freezing.
  */
 
+// One accent across all three chapters. Giving each its own color made the
+// chapter strip look like a legend for three unrelated things rather than a
+// progress indicator through one continuous recording.
+const CHAPTER_ACCENT = "#2EE6A8";
+
 const CHAPTERS = [
-  { label: "Dashboard",   start: 0,     end: 18.04,    color: "#FF5C7A" }, // heat red
-  { label: "Portfolio",   start: 18.05, end: 32.67,    color: "#8055F5" }, // signal violet
-  { label: "Market Chat", start: 32.68, end: Infinity, color: "#3FA7FC" }, // sky
+  { label: "Dashboard",   start: 0,     end: 18.04,    color: CHAPTER_ACCENT },
+  { label: "Portfolio",   start: 18.05, end: 32.67,    color: CHAPTER_ACCENT },
+  { label: "Market Chat", start: 32.68, end: Infinity, color: CHAPTER_ACCENT },
 ];
 
 const FALLBACK_DURATION = 43.7;
@@ -165,9 +169,9 @@ export default function AppShowcase() {
     return (
       <section ref={sectionRef} className="relative z-10 px-6 py-16">
         <div className="text-center mb-7 max-w-2xl mx-auto">
-          <p className="font-mono text-[11px] tracking-[0.28em] text-red uppercase mb-3">The terminal</p>
-          <h2 className="font-display font-bold tracking-tight text-4xl text-white">
-            Where the verdicts <span className="text-gradient-signal">land.</span>
+          <p className="font-mono text-[11px] tracking-[0.24em] text-accent-bright/80 uppercase mb-4">The terminal</p>
+          <h2 className="font-bold tracking-tight text-3xl text-white leading-[1.12]">
+            Where the verdicts <span className="text-white/40">land.</span>
           </h2>
         </div>
 
@@ -201,13 +205,13 @@ export default function AppShowcase() {
 
   return (
     <section ref={sectionRef} className="relative z-10" style={{ height: "340vh" }}>
-      <div className="sticky top-0 h-screen flex flex-col items-center justify-center px-6">
+      <div className="sticky top-0 h-screen flex flex-col items-center justify-center px-6 pt-14">
         <div className="text-center mb-7 max-w-2xl">
-          <p className="font-mono text-[11px] tracking-[0.28em] text-red uppercase mb-3">
-            <GlitchText text="The terminal" />
+          <p className="font-mono text-[11px] tracking-[0.24em] text-accent-bright/80 uppercase mb-4">
+            The terminal
           </p>
-          <h2 className="font-display font-bold tracking-tight text-4xl md:text-5xl text-white">
-            Where the verdicts <span className="text-gradient-signal">land.</span>
+          <h2 className="font-bold tracking-tight text-3xl md:text-[2.75rem] leading-[1.12] text-white">
+            Where the verdicts <span className="text-white/40">land.</span>
           </h2>
         </div>
 

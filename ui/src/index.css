@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Jost:wght@300;400;500;600;700&family=Archivo+Black&family=Playfair+Display:wght@700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -68,20 +68,6 @@ body {
   .aurora-teal, .aurora-violet { animation: none; }
 }
 
-/* ── Custom cursor — hide the native pointer wherever the reticle runs ──
-   Text fields keep the native I-beam (the reticle fades itself out there,
-   see CustomCursor.tsx). Applied only when the component mounts, and the
-   component itself mounts only for fine pointers. */
-html.has-custom-cursor,
-html.has-custom-cursor * {
-  cursor: none !important;
-}
-html.has-custom-cursor input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="button"]):not([type="submit"]),
-html.has-custom-cursor textarea,
-html.has-custom-cursor [contenteditable="true"] {
-  cursor: text !important;
-}
-
 /* ── Intro loader — the mark draws itself, the wordmark staggers in ── */
 @keyframes introDraw {
   from { stroke-dashoffset: var(--len); }
@@ -101,13 +87,6 @@ html.has-custom-cursor [contenteditable="true"] {
   opacity: 0;
   animation: introChar 0.4s ease both;
   animation-delay: calc(var(--ci) * 45ms + 650ms);
-}
-
-/* While the intro curtain is up, hero reveals hold at frame 0 so the page
-   animates in as the curtain lifts, not behind it. */
-.intro-hold .reveal-char,
-.intro-hold .reveal-line > * {
-  animation-play-state: paused !important;
 }
 
 /* ── Glass surfaces ── */
@@ -151,37 +130,16 @@ html.has-custom-cursor [contenteditable="true"] {
   animation-delay: calc(var(--ci) * 42ms + 250ms);
 }
 
-/* Display-headline gradients — the landing speaks two voices:
-   SIGNAL (violet→blue, the AI reasoning) and HEAT (red→orange, the market).
-   Both drift slowly. */
-@keyframes gradientDrift {
-  from { background-position: 0% 50%; }
-  to   { background-position: 100% 50%; }
-}
-.text-gradient-signal {
-  background: linear-gradient(105deg, #7C5CFF 8%, #A78BFA 45%, #5CC8FF 85%);
-  background-size: 220% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: gradientDrift 3s ease-in-out infinite alternate;
-}
+/* Emphasis color for headlines.
+   These were two animated multi-stop gradients that drifted forever (violet→
+   blue "signal" and red→amber "heat"). Both are now a single flat accent:
+   a headline that slowly changes color is the loudest thing on a page, and
+   it competes with the live numbers — which are the only things here that
+   have earned the right to move. Kept as classes (rather than deleted) so
+   every existing usage across the landing components inherits the restraint. */
+.text-gradient-signal,
 .text-gradient-heat {
-  background: linear-gradient(100deg, #FF3D5C 5%, #FF5C7A 35%, #FF7A3D 70%, #FFB03D 95%);
-  background-size: 220% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: gradientDrift 6s ease-in-out infinite alternate;
-}
-/* When a char is BOTH revealed and gradient-filled, run both animations —
-   otherwise the gradient's `animation` shorthand clobbers charUp and the
-   char never leaves opacity 0. */
-.reveal-char.text-gradient-signal {
-  animation:
-    charUp 0.7s cubic-bezier(0.2, 0.75, 0.25, 1) both,
-    gradientDrift 3s ease-in-out infinite alternate;
-  animation-delay: calc(var(--ci) * 42ms + 250ms), 0s;
+  color: #2EE6A8;
 }
 
 /* Ticker tape — infinite marquee (track holds the list twice, translate
@@ -236,7 +194,7 @@ html.has-custom-cursor [contenteditable="true"] {
   transition: opacity 0.35s ease;
   background: radial-gradient(
     340px circle at var(--mx, 50%) var(--my, 50%),
-    var(--spot-color, rgba(255,61,92,0.13)),
+    var(--spot-color, rgba(46,230,168,0.10)),
     transparent 65%
   );
 }
@@ -253,53 +211,17 @@ html.has-custom-cursor [contenteditable="true"] {
   .ticker-tape-track { animation: none; }
 }
 
-/* ── Terminal glitch — brief chromatic bursts every few seconds ──────────
-   Two offset copies (teal + violet) flash in for a few frames with hard
-   clip-path slices, then vanish. Idle ~93% of the loop so it reads as a
-   signal artifact, not a strobe. */
-.glitch {
-  position: relative;
-  display: inline-block;
-}
-.glitch::before,
-.glitch::after {
-  content: attr(data-text);
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  pointer-events: none;
-}
-.glitch::before {
-  color: #FF3D5C;
-  animation: glitchSliceA 5.2s steps(1) infinite;
-}
-.glitch::after {
-  color: #6FBBFF;
-  animation: glitchSliceB 5.2s steps(1) 0.05s infinite;
-}
-@keyframes glitchSliceA {
-  0%, 100%  { opacity: 0; transform: none; clip-path: none; }
-  92%       { opacity: 0.85; transform: translate(-2px, 1px);  clip-path: inset(8% 0 58% 0); }
-  93.4%     { opacity: 0.85; transform: translate(2px, -1px);  clip-path: inset(52% 0 12% 0); }
-  94.8%     { opacity: 0; transform: none; clip-path: none; }
-}
-@keyframes glitchSliceB {
-  0%, 100%  { opacity: 0; transform: none; clip-path: none; }
-  92%       { opacity: 0.75; transform: translate(2px, -1px);  clip-path: inset(45% 0 28% 0); }
-  93.4%     { opacity: 0.75; transform: translate(-2px, 1px);  clip-path: inset(12% 0 66% 0); }
-  94.8%     { opacity: 0; transform: none; clip-path: none; }
-}
-
-/* ── Verdict wall — words ignite to their verdict color on hover ── */
+/* ── Verdict wall — words settle to their verdict color on hover ──────────
+   The chromatic "glitch" burst that used to live here is gone: a deliberate
+   rendering artifact is a strange thing to fake in a product whose entire
+   pitch is that its numbers are trustworthy. */
 .typewall-word:hover {
   color: var(--ignite-color) !important;
   -webkit-text-stroke: 1.5px var(--ignite-color) !important;
-  text-shadow: 0 0 48px var(--ignite-glow) !important;
 }
 .typewall-row { cursor: default; }
 
 @media (prefers-reduced-motion: reduce) {
-  .glitch::before, .glitch::after { animation: none; opacity: 0; }
   .typewall-word, .typewall-word:hover { transition: none; }
 }
 
