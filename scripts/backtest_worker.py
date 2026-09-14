@@ -78,19 +78,26 @@ _ALL_FIELDS = ["trailing_pe", "forward_pe", "revenue_growth", "earnings_growth",
 # creates a real tension for buy scenarios: a 25-call validation batch at
 # this exact window found profit_margin missing in 25/25 calls and
 # revenue_growth in 20/25 (core/point_in_time.py has the measured
-# boundary — it's a few months, not the ~12 originally assumed). Two of
-# the buy criteria's five rules (forward_pe permanently, profit_margin in
-# practice) are close to unconditionally False at this window, and a
-# third (revenue_growth) mostly is; a buy backtest here mainly exercises
-# near_52w_low and not_bearish_market, not the full ruleset a live buy
-# analysis sees. Left as-is rather than shrinking the window (that breaks
-# horizon resolution) or fabricating the missing fields — data_gaps
-# records this transparently per call. Sell only loses revenue_growth the
-# same way and keeps the other four rules live, so it's the more complete
-# signal; weight interpretation (and future sampling) accordingly rather
-# than treating buy and sell backtest volume as equally informative.
+# boundary — it's a few months, not the ~12 originally assumed). Sell
+# only loses revenue_growth the same way and keeps the other four rules
+# live, so it's the more complete signal.
 _BUY_WINDOW_DAYS = (185, 360)
 _SELL_WINDOW_DAYS = (185, 365 * 4)
+
+# Buy needs 4 of its 5 rules to pass (core.criteria's default), and two of
+# them are close to unconditionally False here: forward_pe is NEVER
+# reconstructable (0/225 in the first real batches) and profit_margin is
+# reconstructable in only ~2% of rows at this window. Reaching 4/5 needs
+# that rare profit_margin case, a positive revenue_growth (available in
+# ~19%), AND both always-available rules favorable, all at once — not
+# literally impossible, but rare enough that a real 114-call batch of buy
+# scenarios produced zero YES verdicts, confirmed by the math rather than
+# assumed from the small sample alone. Every buy call at this rate is
+# mostly testing whether reconstructed data clears a threshold it almost
+# never can, not the AI's judgment — near-pure wasted spend. Weighted
+# down hard rather than dropped to zero, so the rare qualifying case (and
+# any future improvement in fundamentals depth) still gets sampled.
+_ACTION_WEIGHTS = {"buy": 0.1, "sell": 0.9}
 
 # A modest, stratified universe to start from — the same large/mid-cap
 # names already in the live RAG index (so their filings are cheap to
@@ -208,7 +215,7 @@ def main() -> int:
     random.seed()  # varies call to call, by design — this extends over time
     plan = []
     for _ in range(args.limit):
-        action = random.choice(["buy", "sell"])
+        action = random.choices(list(_ACTION_WEIGHTS), weights=list(_ACTION_WEIGHTS.values()))[0]
         symbol = random.choice(_TICKERS)
         window = _BUY_WINDOW_DAYS if action == "buy" else _SELL_WINDOW_DAYS
         call_date = _random_call_dates(1, window)[0]
