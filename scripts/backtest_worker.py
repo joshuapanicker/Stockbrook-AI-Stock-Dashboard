@@ -57,6 +57,7 @@ from core.analysis import _build_prompt, _build_retrieval_query, _parse_decision
 from core.backtest_ledger import already_tried, log_backtest_call  # noqa: E402
 from core.criteria import evaluate_criteria  # noqa: E402
 from core.filings import extract_section, get_recent_filings, _strip_html, _throttled_get  # noqa: E402
+from core.output_audit import unsourced_numbers  # noqa: E402
 from core.point_in_time import (  # noqa: E402
     price_on_or_before, reconstruct_market_context, reconstruct_metrics,
 )
@@ -191,14 +192,23 @@ def run_one(symbol: str, action: str, call_date: date, market: dict) -> str:
     if decision is None:
         return "skip (unparseable response)"
 
+    unsourced = unsourced_numbers(text, prompt)
+
     ok = log_backtest_call(
         symbol, action, decision, metrics["close_price"], market.get("spy_latest"),
         criteria_result.get("rules_met"), criteria_result.get("rules_total"),
         call_date, data_gaps,
         filing_form=filing_meta["form"] if filing_meta else None,
         filing_date=filing_meta["date"] if filing_meta else None,
+        # What the rules concluded on their own, before Claude saw anything —
+        # the arm the AI has to beat to be worth its cost.
+        criteria_passed=bool(criteria_result.get("passed")),
+        unsourced=unsourced,
     )
-    return f"{'logged' if ok else 'LOG FAILED'}: {decision} (gaps: {data_gaps or 'none'})"
+    flag = f" unsourced:{unsourced}" if unsourced else ""
+    return (f"{'logged' if ok else 'LOG FAILED'}: {decision} "
+           f"(rules:{'PASS' if criteria_result.get('passed') else 'fail'}, "
+           f"gaps: {len(data_gaps)}){flag}")
 
 
 def main() -> int:

@@ -63,7 +63,9 @@ def log_backtest_call(symbol: str, action: str, decision: str,
                       rules_met: int | None, rules_total: int | None,
                       call_date: date, data_gaps: list[str],
                       filing_form: str | None = None,
-                      filing_date: str | None = None) -> bool:
+                      filing_date: str | None = None,
+                      criteria_passed: bool | None = None,
+                      unsourced: list[str] | None = None) -> bool:
     """Insert one backtest verdict. Returns True on success, False on a
     genuine failure (duplicates are treated as success — the row already
     exists, which is the desired end state either way)."""
@@ -78,6 +80,8 @@ def log_backtest_call(symbol: str, action: str, decision: str,
         "rules_met": rules_met, "rules_total": rules_total,
         "call_date": call_date.isoformat(), "data_gaps": data_gaps,
         "filing_form": filing_form, "filing_date": filing_date,
+        "criteria_passed": criteria_passed,
+        "unsourced_numbers": unsourced or [],
     }
     try:
         sb.table("ai_calls_backtest").insert(row).execute()
@@ -103,30 +107,81 @@ def _all_backtest_calls() -> list[dict]:
         return []
 
 
+def _score(rows: list[dict], action: str, label: str) -> dict:
+    """Win rate / return / alpha for one set of already-resolved calls.
+
+    Both returns and alpha are reported in the DIRECTION THE CALL IMPLIED,
+    not as the raw stock move: for a sell, a stock that fell is a win, so
+    its sign is flipped here. The raw per-row `return_*`/`alpha_*` fields
+    stay factual (what the stock actually did) — this is the only place
+    that reorients them, because an aggregate labelled "avg alpha" is
+    read as "how well did the calls do", and an unflipped sell average
+    says the exact opposite of what a reader assumes.
+    """
+    rows = [r for r in rows if f"return_{label}" in r]
+    if not rows:
+        return {"count": 0, "avg_return": None, "win_rate": None,
+                "avg_alpha_vs_spy": None}
+    sign = 1 if action == "buy" else -1
+    rets = [sign * r[f"return_{label}"] for r in rows]
+    alphas = [sign * r[f"alpha_{label}"] for r in rows if f"alpha_{label}" in r]
+    wins = sum(1 for r in rets if r > 0)
+    return {
+        "count": len(rets),
+        "avg_return": round(sum(rets) / len(rets), 4),
+        "win_rate": round(wins / len(rets), 4),
+        "avg_alpha_vs_spy": round(sum(alphas) / len(alphas), 4) if alphas else None,
+    }
+
+
 def compute_backtest_record() -> dict:
-    """Same shape as core.track_record.compute_track_record(), computed
-    over the backtest table instead — kept as a distinctly-labeled result
-    rather than merged into the live summary."""
-    calls = [c for c in _all_backtest_calls() if c.get("decision") == "YES"]
-    resolved = [_resolve_row(c) for c in calls]
+    """Scored backtest results, as three arms that only mean something
+    side by side.
+
+      ai_yes        — calls where Claude said YES
+      rules_passed  — calls where the deterministic criteria passed,
+                      whatever Claude then said
+      all_calls     — every call sampled, the base rate
+
+    The third arm is what makes the other two readable. Equities drift
+    up, so on a long horizon a "sell" that never fires looks brilliant
+    and one that always fires looks terrible, with no skill involved
+    either way. A win rate is only interpretable as the distance between
+    an arm and that base rate — and the AI is only earning its cost if
+    ai_yes beats rules_passed, since the rules run for free.
+    """
+    all_rows = _all_backtest_calls()
+    resolved = [_resolve_row(c) for c in all_rows]
+
+    ai_yes = [r for r in resolved if r.get("decision") == "YES"]
+    rules_passed = [r for r in resolved if r.get("criteria_passed") is True]
 
     summary: dict[str, Any] = {}
     for label in HORIZONS:
         for action in ("buy", "sell"):
-            rows = [r for r in resolved if r["action"] == action and f"return_{label}" in r]
-            rets = [r[f"return_{label}"] for r in rows]
-            alphas = [r[f"alpha_{label}"] for r in rows if f"alpha_{label}" in r]
-            wins = sum(1 for r in rets if (r > 0 if action == "buy" else r < 0))
+            by_action = lambda rows: [r for r in rows if r["action"] == action]  # noqa: E731
             summary[f"{action}_{label}"] = {
-                "count": len(rets),
-                "avg_return": round(sum(rets) / len(rets), 4) if rets else None,
-                "win_rate": round(wins / len(rets), 4) if rets else None,
-                "avg_alpha_vs_spy": round(sum(alphas) / len(alphas), 4) if alphas else None,
+                "ai_yes": _score(by_action(ai_yes), action, label),
+                "rules_passed": _score(by_action(rules_passed), action, label),
+                "all_calls": _score(by_action(resolved), action, label),
             }
+
+    # Rows written before criteria_passed/unsourced_numbers existed carry
+    # NULLs; the comparison arms are only as big as the rows that have them.
+    with_baseline = sum(1 for r in all_rows if r.get("criteria_passed") is not None)
+    audited = [r for r in all_rows if r.get("unsourced_numbers") is not None]
+    flagged = [r for r in audited if r.get("unsourced_numbers")]
 
     return {
         "summary": summary,
-        "total_backtest_calls": len(calls),
+        "total_backtest_calls": len(all_rows),
+        "ai_yes_calls": len(ai_yes),
+        "rows_with_baseline": with_baseline,
+        "faithfulness": {
+            "audited": len(audited),
+            "with_unsourced_numbers": len(flagged),
+            "rate": round(len(flagged) / len(audited), 4) if audited else None,
+        },
         "is_backtest": True,  # every consumer of this dict must label it as such
         "recent_calls": resolved[:60],
     }

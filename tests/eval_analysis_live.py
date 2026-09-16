@@ -40,6 +40,7 @@ if _env_file.exists():
                 os.environ.setdefault(_k.strip(), _v.strip())
 
 from core.analysis import _build_prompt, _parse_decision  # noqa: E402
+from core.output_audit import unsourced_numbers  # noqa: E402
 
 MODEL = "claude-haiku-4-5-20251001"
 SYSTEM = ("You are a disciplined stock analysis assistant. "
@@ -101,28 +102,6 @@ SCENARIOS = [
 ]
 
 
-def numbers(text: str) -> set[str]:
-    """Numeric tokens as written."""
-    return {f"{float(n):g}" for n in re.findall(r"\d+(?:\.\d+)?", text)}
-
-
-def sourced(prompt: str) -> set[str]:
-    """Every figure the model may legitimately state, given the prompt.
-
-    Ratios count as their percentage too: the prompt carries
-    `"profit_margin":0.63` and the model quite correctly writes "63%
-    margin". Without that, every run reports invented numbers that were
-    never invented. This stays a heuristic — a model that divides one
-    provided figure by another is deriving, not fabricating — so unmatched
-    values are printed for a human to glance at rather than failed on.
-    """
-    out: set[str] = set()
-    for raw in re.findall(r"\d+(?:\.\d+)?", prompt):
-        val = float(raw)
-        out |= {f"{val:g}", f"{val * 100:g}", f"{round(val * 100):g}"}
-    return out
-
-
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", type=int, default=3,
@@ -142,7 +121,6 @@ def main() -> int:
     for name, symbol, action, metrics, crit, gain, met, expect_stable in SCENARIOS:
         prompt = _build_prompt(symbol, action, crit, metrics, BULL,
                                gain_pct=gain)
-        prompt_nums = sourced(prompt)
         verdicts: Counter[str] = Counter()
         denials = 0
         malformed = 0
@@ -161,11 +139,7 @@ def main() -> int:
             verdicts[decision or "UNPARSEABLE"] += 1
             if met and DENIAL.search(out):
                 denials += 1
-            # Only flag numbers the model could not have derived: ignore
-            # anything appearing in the prompt, and small integers it uses
-            # to count rules or list bullets.
-            invented |= {n for n in numbers(out) - prompt_nums
-                         if float(n) > 10}
+            invented |= set(unsourced_numbers(out, prompt))
 
         _, top_n = verdicts.most_common(1)[0]
         stable = top_n == args.runs

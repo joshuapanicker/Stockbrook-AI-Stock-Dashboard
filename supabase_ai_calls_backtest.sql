@@ -24,6 +24,18 @@ create table if not exists ai_calls_backtest (
   data_gaps          text[] not null default '{}',
   filing_form        text,                      -- '10-K' | '10-Q' | null if ungrounded
   filing_date        date,
+  -- What the deterministic criteria engine concluded on its own, BEFORE
+  -- Claude was asked. Scored against the same forward price history as
+  -- the AI's verdict, so the two can be compared directly: the question
+  -- isn't only "was the AI right", it's "did asking the AI beat just
+  -- following the rules". Without this the track record can't separate
+  -- the model's contribution from the screener's.
+  criteria_passed    boolean,
+  -- Figures in the model's answer that trace back to nothing in its
+  -- prompt. Not proof of fabrication (dividing two provided numbers
+  -- yields a third that isn't literally present), but the RATE across
+  -- many calls measures whether it's reading its inputs or reaching.
+  unsourced_numbers  text[] not null default '{}',
   created_at         timestamptz not null default now(),
   unique (symbol, action, call_date)
 );
@@ -36,3 +48,14 @@ create index if not exists ai_calls_backtest_call_date_idx
 -- Same policy as ai_calls: only the service role writes and reads. Served
 -- through our own API, never queried directly by the frontend.
 alter table ai_calls_backtest enable row level security;
+
+-- ── Migration, 2026-09-15 ───────────────────────────────────────────────
+-- For a table created before criteria_passed / unsourced_numbers existed.
+-- Safe to run repeatedly, and safe to run on a fresh table created by the
+-- statement above (both are no-ops there). Rows written before this keep
+-- NULL/empty and are simply excluded from the comparison arms rather than
+-- counted as a passing baseline or a clean audit.
+alter table ai_calls_backtest
+  add column if not exists criteria_passed boolean;
+alter table ai_calls_backtest
+  add column if not exists unsourced_numbers text[] not null default '{}';
