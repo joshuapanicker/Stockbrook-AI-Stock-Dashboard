@@ -111,3 +111,23 @@ def test_number_absent_from_prompt_is_flagged():
 def test_small_numbers_are_ignored_as_structural():
     """"2 of 5 criteria", bullet numbering, a P/E of 8 — not claims."""
     assert unsourced_numbers("2 of 5 rules, point 3", "nothing here") == []
+
+
+def test_price_rounded_to_cents_is_not_flagged():
+    """The real false positive this check produced: the prompt carries
+    276.957352118569 and the model writes the price to the cent. That's
+    correct, readable behaviour, not invention."""
+    prompt = '"high_52_week":276.957352118569'
+    assert unsourced_numbers("52-week high of 276.96", prompt) == []
+
+
+def test_percentage_rounded_to_one_decimal_is_not_flagged():
+    """Same failure in the ratio case: 0.42413 rendered as "42.4%"."""
+    assert unsourced_numbers("42.4% below the high", '"distance":0.42413') == []
+
+
+def test_rounding_tolerance_does_not_swallow_a_real_invention():
+    """The tolerance must follow the precision the model wrote, not wave
+    through anything nearby — 280 is not a rounding of 276.96."""
+    prompt = '"high_52_week":276.957352118569'
+    assert unsourced_numbers("high of 280", prompt) == ["280"]

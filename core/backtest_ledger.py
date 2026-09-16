@@ -81,7 +81,11 @@ def log_backtest_call(symbol: str, action: str, decision: str,
         "call_date": call_date.isoformat(), "data_gaps": data_gaps,
         "filing_form": filing_form, "filing_date": filing_date,
         "criteria_passed": criteria_passed,
-        "unsourced_numbers": unsourced or [],
+        # None stays None: that's "not audited", which the faithfulness
+        # rate must exclude rather than count as a clean result. An empty
+        # list is the different, stronger claim that it WAS audited and
+        # nothing was flagged.
+        "unsourced_numbers": unsourced,
     }
     try:
         sb.table("ai_calls_backtest").insert(row).execute()

@@ -35,7 +35,10 @@ create table if not exists ai_calls_backtest (
   -- prompt. Not proof of fabrication (dividing two provided numbers
   -- yields a third that isn't literally present), but the RATE across
   -- many calls measures whether it's reading its inputs or reaching.
-  unsourced_numbers  text[] not null default '{}',
+  -- NULL means "not audited", which is NOT the same as '{}' ("audited,
+  -- nothing flagged") — defaulting to '{}' silently counted every row
+  -- written before the audit existed as a clean result.
+  unsourced_numbers  text[],
   created_at         timestamptz not null default now(),
   unique (symbol, action, call_date)
 );
@@ -58,4 +61,26 @@ alter table ai_calls_backtest enable row level security;
 alter table ai_calls_backtest
   add column if not exists criteria_passed boolean;
 alter table ai_calls_backtest
-  add column if not exists unsourced_numbers text[] not null default '{}';
+  add column if not exists unsourced_numbers text[];
+
+-- ── Migration, 2026-09-16 ───────────────────────────────────────────────
+-- Two corrections to the audit column, both found by checking the first
+-- real results instead of trusting them.
+--
+-- 1. It was NOT NULL DEFAULT '{}', so every row written before the audit
+--    existed read as "audited, nothing flagged". The denominator was 600+
+--    rows that were never actually checked. NULL now means "not audited".
+-- 2. The first 8 genuinely-audited rows were checked by a version that
+--    compared numbers as strings, so a price correctly rounded to the
+--    cent (276.96 against a stored 276.957352118569) was flagged as
+--    invented. Those flags are unreliable.
+--
+-- Both are cleared rather than kept: the verdicts, criteria_passed and
+-- returns on these rows are all still valid, only the audit field is
+-- untrustworthy, and claiming an audit that didn't happen is worse than
+-- admitting the sample starts now.
+alter table ai_calls_backtest
+  alter column unsourced_numbers drop not null;
+alter table ai_calls_backtest
+  alter column unsourced_numbers drop default;
+update ai_calls_backtest set unsourced_numbers = null;

@@ -47,6 +47,10 @@ def sourced(prompt: str) -> set[str]:
     return out
 
 
+def _decimals(token: str) -> int:
+    return len(token.split(".")[1]) if "." in token else 0
+
+
 def unsourced_numbers(output: str, prompt: str) -> list[str]:
     """Figures in `output` that don't trace back to anything in `prompt`.
 
@@ -57,6 +61,27 @@ def unsourced_numbers(output: str, prompt: str) -> list[str]:
     at", and the RATE across many calls as the signal — a model that
     stays near zero is reading its inputs; one that drifts upward is
     reaching for something else.
+
+    Matching is by ROUNDING, not string equality. The prompt carries raw
+    floats (`high_52_week: 276.957352118569`) and a model quite properly
+    writes a price to the cent — "276.96". An exact-string check calls
+    that a fabrication, which in testing flagged 2 of 8 calls for nothing
+    worse than being readable. Each output figure is therefore compared
+    against every prompt value rounded to the same precision the model
+    chose to write.
     """
-    extra = numbers(output) - sourced(prompt)
-    return sorted(n for n in extra if float(n) > _TRIVIAL_MAX)
+    prompt_values: list[float] = []
+    for raw in _NUMBER.findall(prompt):
+        val = float(raw)
+        prompt_values += [val, val * 100]
+
+    out: list[str] = []
+    for token in sorted(numbers(output)):
+        value = float(token)
+        if value <= _TRIVIAL_MAX:
+            continue
+        places = _decimals(token)
+        if any(round(v, places) == value for v in prompt_values):
+            continue
+        out.append(token)
+    return out
