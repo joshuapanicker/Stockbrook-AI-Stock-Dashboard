@@ -131,3 +131,23 @@ def test_rounding_tolerance_does_not_swallow_a_real_invention():
     through anything nearby — 280 is not a rounding of 276.96."""
     prompt = '"high_52_week":276.957352118569'
     assert unsourced_numbers("high of 280", prompt) == ["280"]
+
+
+# ── universe tiers ──────────────────────────────────────────────────────
+
+def test_universe_tiers_are_disjoint_and_cover_everything():
+    """A symbol counted in both tiers would put the same stock in both
+    arms of the comparison; one in neither would never be sampled."""
+    import json
+    import sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(root / "scripts"))
+    from backtest_worker import _load_universe
+
+    tiers = _load_universe()
+    core, broad = set(tiers["core"]), set(tiers["broad"])
+    assert core and broad
+    assert not core & broad
+    listed = set(json.loads((root / "data" / "universe.json").read_text())["symbols"])
+    assert (core | broad) >= listed

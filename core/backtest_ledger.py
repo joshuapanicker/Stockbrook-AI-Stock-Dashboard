@@ -40,6 +40,28 @@ def _supabase():
         return None
 
 
+_REQUIRED_COLUMNS = ("criteria_passed", "unsourced_numbers",
+                     "response_text", "universe_tier")
+
+
+def schema_ready() -> bool:
+    """Does the table have every column log_backtest_call writes?
+
+    Run before a batch spends anything. A missing column doesn't fail
+    until the insert, AFTER the Claude call it was meant to record has
+    already been paid for — a whole scheduled run could be spent that way
+    with nothing to show for it."""
+    sb = _supabase()
+    if not sb:
+        return False
+    try:
+        sb.table("ai_calls_backtest").select(",".join(_REQUIRED_COLUMNS)).limit(1).execute()
+        return True
+    except Exception:
+        _log.exception("ai_calls_backtest schema check failed")
+        return False
+
+
 def already_tried(symbol: str, action: str, call_date: date) -> bool:
     """Has this exact (symbol, action, date) combination already been
     generated? Checked before spending an API call, not relied on as the
@@ -65,7 +87,9 @@ def log_backtest_call(symbol: str, action: str, decision: str,
                       filing_form: str | None = None,
                       filing_date: str | None = None,
                       criteria_passed: bool | None = None,
-                      unsourced: list[str] | None = None) -> bool:
+                      unsourced: list[str] | None = None,
+                      response_text: str | None = None,
+                      universe_tier: str | None = None) -> bool:
     """Insert one backtest verdict. Returns True on success, False on a
     genuine failure (duplicates are treated as success — the row already
     exists, which is the desired end state either way)."""
@@ -86,6 +110,11 @@ def log_backtest_call(symbol: str, action: str, decision: str,
         # list is the different, stronger claim that it WAS audited and
         # nothing was flagged.
         "unsourced_numbers": unsourced,
+        # Kept so a flagged number can be read in context later. Without
+        # the model's own words, "unsourced" can't be told apart from
+        # honest arithmetic after the fact.
+        "response_text": response_text,
+        "universe_tier": universe_tier,
     }
     try:
         sb.table("ai_calls_backtest").insert(row).execute()
@@ -102,11 +131,23 @@ def _all_backtest_calls() -> list[dict]:
     sb = _supabase()
     if not sb:
         return []
+    # Paged, not one .limit(): Supabase caps a single response at 1,000 rows
+    # regardless of the limit asked for, so a lone request silently returns
+    # the newest 1,000 and every total computed from it stops growing.
+    rows: list[dict] = []
+    page = 1000
     try:
-        res = (sb.table("ai_calls_backtest").select("*")
-               .order("created_at", desc=True).limit(10_000).execute())
-        return res.data or []
+        while True:
+            res = (sb.table("ai_calls_backtest").select("*")
+                   .order("id", desc=True)
+                   .range(len(rows), len(rows) + page - 1).execute())
+            batch = res.data or []
+            rows.extend(batch)
+            if len(batch) < page:
+                return rows
     except Exception:
+        # Not the pages read so far — a partial set is exactly the silent
+        # undercount the paging exists to prevent.
         _log.exception("ai_calls_backtest read failed")
         return []
 
@@ -138,6 +179,22 @@ def _score(rows: list[dict], action: str, label: str) -> dict:
     }
 
 
+def _summarize(resolved: list[dict]) -> dict[str, Any]:
+    ai_yes = [r for r in resolved if r.get("decision") == "YES"]
+    rules_passed = [r for r in resolved if r.get("criteria_passed") is True]
+    summary: dict[str, Any] = {}
+    for label in HORIZONS:
+        for action in ("buy", "sell"):
+            def by_action(rows: list[dict]) -> list[dict]:
+                return [r for r in rows if r["action"] == action]
+            summary[f"{action}_{label}"] = {
+                "ai_yes": _score(by_action(ai_yes), action, label),
+                "rules_passed": _score(by_action(rules_passed), action, label),
+                "all_calls": _score(by_action(resolved), action, label),
+            }
+    return summary
+
+
 def compute_backtest_record() -> dict:
     """Scored backtest results, as three arms that only mean something
     side by side.
@@ -153,22 +210,24 @@ def compute_backtest_record() -> dict:
     either way. A win rate is only interpretable as the distance between
     an arm and that base rate — and the AI is only earning its cost if
     ai_yes beats rules_passed, since the rules run for free.
+
+    Also split by the universe tier each call was sampled from. The first
+    ~800 calls came from a fixed list of 30 mega-caps (recorded as
+    "legacy30"), which are large today because they rose — a finding that
+    only shows up there may be that bias rather than the model.
     """
     all_rows = _all_backtest_calls()
     resolved = [_resolve_row(c) for c in all_rows]
 
-    ai_yes = [r for r in resolved if r.get("decision") == "YES"]
-    rules_passed = [r for r in resolved if r.get("criteria_passed") is True]
-
-    summary: dict[str, Any] = {}
-    for label in HORIZONS:
-        for action in ("buy", "sell"):
-            by_action = lambda rows: [r for r in rows if r["action"] == action]  # noqa: E731
-            summary[f"{action}_{label}"] = {
-                "ai_yes": _score(by_action(ai_yes), action, label),
-                "rules_passed": _score(by_action(rules_passed), action, label),
-                "all_calls": _score(by_action(resolved), action, label),
-            }
+    tiers = sorted({r.get("universe_tier") or "unknown" for r in resolved})
+    by_tier = {
+        t: {
+            "calls": sum(1 for r in resolved if (r.get("universe_tier") or "unknown") == t),
+            "summary": _summarize([r for r in resolved
+                                   if (r.get("universe_tier") or "unknown") == t]),
+        }
+        for t in tiers
+    }
 
     # Rows written before criteria_passed/unsourced_numbers existed carry
     # NULLs; the comparison arms are only as big as the rows that have them.
@@ -177,9 +236,10 @@ def compute_backtest_record() -> dict:
     flagged = [r for r in audited if r.get("unsourced_numbers")]
 
     return {
-        "summary": summary,
+        "summary": _summarize(resolved),
+        "by_tier": by_tier,
         "total_backtest_calls": len(all_rows),
-        "ai_yes_calls": len(ai_yes),
+        "ai_yes_calls": sum(1 for r in resolved if r.get("decision") == "YES"),
         "rows_with_baseline": with_baseline,
         "faithfulness": {
             "audited": len(audited),

@@ -39,6 +39,13 @@ create table if not exists ai_calls_backtest (
   -- nothing flagged") — defaulting to '{}' silently counted every row
   -- written before the audit existed as a clean result.
   unsourced_numbers  text[],
+  -- The model's full answer, so a flagged number can be read in context.
+  -- Without it "unsourced" can't be told apart from honest arithmetic.
+  response_text      text,
+  -- Which slice of the universe the symbol was sampled from:
+  -- 'core' (curated large caps), 'broad' (every other listed stock), or
+  -- 'legacy30' (the fixed 30 mega-caps the first ~800 calls used).
+  universe_tier      text,
   created_at         timestamptz not null default now(),
   unique (symbol, action, call_date)
 );
@@ -83,4 +90,19 @@ alter table ai_calls_backtest
   alter column unsourced_numbers drop not null;
 alter table ai_calls_backtest
   alter column unsourced_numbers drop default;
-update ai_calls_backtest set unsourced_numbers = null;
+-- Scoped by date, NOT unconditional: this file is meant to be safe to
+-- re-run, and a bare update would wipe every legitimate audit written
+-- since. Rows from 2026-09-16 on were checked by the corrected version.
+update ai_calls_backtest set unsourced_numbers = null
+  where created_at < '2026-09-16';
+
+-- ── Migration, 2026-09-16 (2) ───────────────────────────────────────────
+-- Stores the model's answer and the universe tier. The first ~800 calls
+-- all came from a fixed list of 30 mega-caps; they're labelled 'legacy30'
+-- so the analysis can keep them apart from the wider sample rather than
+-- blending a survivorship-biased slice into it.
+alter table ai_calls_backtest add column if not exists response_text text;
+alter table ai_calls_backtest add column if not exists universe_tier text;
+update ai_calls_backtest set universe_tier = 'legacy30' where universe_tier is null;
+create index if not exists ai_calls_backtest_tier_idx
+  on ai_calls_backtest (universe_tier);

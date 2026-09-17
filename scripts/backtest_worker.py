@@ -34,6 +34,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import random
 import sys
 import time
@@ -54,7 +55,7 @@ if _env_file.exists():
                 os.environ.setdefault(_k.strip(), _v.strip())
 
 from core.analysis import _build_prompt, _build_retrieval_query, _parse_decision  # noqa: E402
-from core.backtest_ledger import already_tried, log_backtest_call  # noqa: E402
+from core.backtest_ledger import already_tried, log_backtest_call, schema_ready  # noqa: E402
 from core.criteria import evaluate_criteria  # noqa: E402
 from core.filings import extract_section, get_recent_filings, _strip_html, _throttled_get  # noqa: E402
 from core.output_audit import unsourced_numbers  # noqa: E402
@@ -100,14 +101,32 @@ _SELL_WINDOW_DAYS = (185, 365 * 4)
 # any future improvement in fundamentals depth) still gets sampled.
 _ACTION_WEIGHTS = {"buy": 0.1, "sell": 0.9}
 
-# A modest, stratified universe to start from — the same large/mid-cap
-# names already in the live RAG index (so their filings are cheap to
-# fetch), not the full ~5700-symbol universe. Widen once this is proven.
-_TICKERS = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "JPM", "GS", "BAC", "WFC",
-    "JNJ", "PFE", "UNH", "PG", "KO", "PEP", "WMT", "HD", "MCD", "DIS",
-    "XOM", "CVX", "CAT", "BA", "GE", "T", "VZ", "INTC", "AMD", "CSCO",
-]
+# Sampled from the app's own universe (data/universe.json, tracked in git so
+# this runs anywhere), in two tiers drawn 50/50 so each gets a usable sample:
+#
+#   core   — the ~530 curated large caps the app fetches first
+#   broad  — every other US-listed common stock, ~5,200 names
+#
+# The first ~800 backtest calls used a fixed list of 30 mega-caps. Those are
+# large today BECAUSE they went up, which tilts every sell backtest toward
+# looking wrong. Recording the tier per call lets the analysis check whether
+# a finding holds outside that group instead of averaging the bias away.
+#
+# This narrows survivorship bias; it doesn't remove it. The listing is of
+# stocks trading TODAY — names delisted since (bankruptcies, buyouts) are
+# absent, and yfinance can't price most of them anyway. The broad tier also
+# includes some non-operating listings (closed-end funds, shells) the symbol
+# filter lets through; they tend to show up as heavy data_gaps.
+_TIER_WEIGHTS = {"core": 0.5, "broad": 0.5}
+
+
+def _load_universe() -> dict[str, list[str]]:
+    path = Path(__file__).resolve().parent.parent / "data" / "universe.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    core = list(dict.fromkeys(data.get("core_symbols") or []))
+    core_set = set(core)
+    broad = [s for s in dict.fromkeys(data.get("symbols") or []) if s not in core_set]
+    return {"core": core, "broad": broad}
 
 
 def _random_call_dates(n: int, window: tuple[int, int]) -> list[date]:
@@ -155,7 +174,8 @@ def _filing_context_asof(symbol: str, as_of: date, criteria_result: dict,
     return block, best_meta
 
 
-def run_one(symbol: str, action: str, call_date: date, market: dict) -> str:
+def run_one(symbol: str, action: str, call_date: date, market: dict,
+            tier: str) -> str:
     """Returns a short status string for logging; never raises — a bad
     ticker/date combination must not stop the batch."""
     if already_tried(symbol, action, call_date):
@@ -204,6 +224,8 @@ def run_one(symbol: str, action: str, call_date: date, market: dict) -> str:
         # the arm the AI has to beat to be worth its cost.
         criteria_passed=bool(criteria_result.get("passed")),
         unsourced=unsourced,
+        response_text=text,
+        universe_tier=tier,
     )
     flag = f" unsourced:{unsourced}" if unsourced else ""
     return (f"{'logged' if ok else 'LOG FAILED'}: {decision} "
@@ -222,33 +244,44 @@ def main() -> int:
         print("ANTHROPIC_API_KEY not set", file=sys.stderr)
         return 2
 
+    if not args.dry_run and not schema_ready():
+        # Checked before any spend: a batch against a table missing a column
+        # would pay for every Claude call and then fail every insert.
+        print("ai_calls_backtest is missing columns this worker writes - run "
+              "the latest migration in supabase_ai_calls_backtest.sql",
+              file=sys.stderr)
+        return 3
+
+    universe = _load_universe()
     random.seed()  # varies call to call, by design — this extends over time
     plan = []
     for _ in range(args.limit):
         action = random.choices(list(_ACTION_WEIGHTS), weights=list(_ACTION_WEIGHTS.values()))[0]
-        symbol = random.choice(_TICKERS)
+        tier = random.choices(list(_TIER_WEIGHTS), weights=list(_TIER_WEIGHTS.values()))[0]
+        symbol = random.choice(universe[tier])
         window = _BUY_WINDOW_DAYS if action == "buy" else _SELL_WINDOW_DAYS
         call_date = _random_call_dates(1, window)[0]
-        plan.append((symbol, action, call_date))
+        plan.append((symbol, action, call_date, tier))
 
-    print(f"{len(plan)} candidates\n")
+    print(f"{len(plan)} candidates (universe: {len(universe['core'])} core, "
+          f"{len(universe['broad'])} broad)\n")
     if args.dry_run:
-        for symbol, action, call_date in plan:
-            print(f"  {symbol:<6} {action:<4} {call_date}")
+        for symbol, action, call_date, tier in plan:
+            print(f"  {symbol:<6} {action:<4} {call_date}  {tier}")
         return 0
 
     market_cache: dict[date, dict] = {}
     logged = 0
-    for i, (symbol, action, call_date) in enumerate(plan, 1):
+    for i, (symbol, action, call_date, tier) in enumerate(plan, 1):
         if call_date not in market_cache:
             market_cache[call_date] = reconstruct_market_context(call_date)
         try:
-            status = run_one(symbol, action, call_date, market_cache[call_date])
+            status = run_one(symbol, action, call_date, market_cache[call_date], tier)
         except Exception as exc:
             status = f"ERROR: {exc}"
         if status.startswith("logged"):
             logged += 1
-        print(f"[{i}/{len(plan)}] {symbol:<6} {action:<4} {call_date}  {status}", flush=True)
+        print(f"[{i}/{len(plan)}] {symbol:<6} {action:<4} {call_date} {tier:<5} {status}", flush=True)
 
     print(f"\n{logged}/{len(plan)} new calls logged "
          f"(~${logged * 0.0033:.2f})")

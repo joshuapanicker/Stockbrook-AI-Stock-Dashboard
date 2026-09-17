@@ -25,7 +25,9 @@ on:
 jobs:
   backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Raised from 30 when sampling widened to ~5,700 symbols: small caps mean
+    # more first-time SEC lookups per call. Runs have taken ~16 minutes.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
