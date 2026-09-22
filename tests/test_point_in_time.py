@@ -65,9 +65,11 @@ def quarterly_income(cols: dict[str, dict[str, float]]) -> pd.DataFrame:
     return df
 
 
-# Real yfinance always returns a tz-aware DatetimeIndex, empty or not —
-# match that rather than pandas' default RangeIndex, which the real code
-# never has to handle and .index.date can't be called on.
+# yfinance USUALLY returns a tz-aware DatetimeIndex, so that's the default
+# fixture — but "always" was wrong. In production an unresolvable symbol
+# (a delisted ticker, a transient 404 on ^VIX) came back as an empty frame
+# with a plain Index, `.index.date` raised, and four scheduled runs died.
+# _PLAIN_INDEX_HISTORY below is that real shape.
 _EMPTY_HISTORY = pd.DataFrame(columns=["Open", "High", "Low", "Close"],
                               index=pd.DatetimeIndex([], tz="America/New_York"))
 _EMPTY_EARNINGS = pd.DataFrame(columns=["Reported EPS"],
@@ -283,3 +285,41 @@ def test_market_trend_bearish_when_price_below_both_averages():
     with patch("core.point_in_time.yf.Ticker", side_effect=side_effect):
         result = reconstruct_market_context(as_of)
     assert result["market_trend"] == "bearish"
+
+
+# ── indexes that aren't dated ───────────────────────────────────────────
+
+_PLAIN_INDEX_HISTORY = pd.DataFrame(columns=["Open", "High", "Low", "Close"])
+
+
+def test_price_metrics_survive_an_undated_index():
+    """The production crash: an empty frame with a plain Index, not a
+    DatetimeIndex. `.index.date` raises AttributeError on it."""
+    with patch("core.point_in_time.yf.Ticker",
+               return_value=mock_ticker(history=_PLAIN_INDEX_HISTORY)):
+        result = reconstruct_price_metrics("ZZZZ", date(2026, 1, 1))
+    assert result["close_price"] is None
+
+
+def test_market_context_survives_an_undated_vix_index():
+    """Exactly what took the runs down: SPY resolved fine, ^VIX came back
+    with an undated index, and the whole batch aborted on it."""
+    as_of = date(2026, 3, 1)
+    rows = [((date(2026, 1, 1) + timedelta(days=i)).isoformat(), 100 + i, 100 + i,
+            100 + i, 100 + i) for i in range(60)]
+    spy_hist = daily_history(rows)
+
+    def side_effect(sym):
+        return mock_ticker(history=_PLAIN_INDEX_HISTORY if sym == "^VIX" else spy_hist)
+
+    with patch("core.point_in_time.yf.Ticker", side_effect=side_effect):
+        result = reconstruct_market_context(as_of)
+    assert result["market_trend"] == "bullish"   # SPY still worked
+    assert result["vix"] is None                 # VIX degraded, didn't raise
+
+
+def test_trailing_eps_survives_an_undated_earnings_index():
+    undated = pd.DataFrame({"Reported EPS": [1.0]})
+    with patch("core.point_in_time.yf.Ticker",
+               return_value=mock_ticker(earnings_dates_df=undated)):
+        assert _trailing_eps_asof("ZZZZ", date(2026, 1, 1)) is None

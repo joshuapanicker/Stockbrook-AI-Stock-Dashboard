@@ -100,6 +100,29 @@ def _safe(x):
         return None
 
 
+def _dates(frame):
+    """The frame's index as dates, or None if it isn't a datetime index.
+
+    yfinance USUALLY returns a tz-aware DatetimeIndex — but not always. A
+    symbol it can't resolve (a delisted ticker, a transient 404 on ^VIX)
+    can come back as an empty frame carrying a plain Index, and
+    `.index.date` then raises AttributeError. That took down four
+    scheduled backtest runs before it was caught, because the market
+    context is fetched once per date for the whole batch: one bad ^VIX
+    response aborted 200 calls rather than skipping one.
+    """
+    idx = getattr(frame, "index", None)
+    return idx.date if hasattr(idx, "date") else None
+
+
+def _on_or_before(frame, cutoff: date):
+    """Rows dated on or before `cutoff`; empty if the index isn't dated."""
+    dates = _dates(frame)
+    if dates is None:
+        return frame.iloc[0:0]
+    return frame[dates <= cutoff]
+
+
 # ── Price-based reconstruction (deep history, no ceiling) ───────────────
 
 def reconstruct_price_metrics(symbol: str, as_of: date | str) -> dict:
@@ -117,7 +140,7 @@ def reconstruct_price_metrics(symbol: str, as_of: date | str) -> dict:
                 "low_52_week": None, "high_52_week": None,
                 "distance_to_low_pct": None, "distance_to_high_pct": None}
 
-    hist = hist[hist.index.date <= as_of]
+    hist = _on_or_before(hist, as_of)
     if hist.empty:
         return {"symbol": symbol.upper(), "date": None, "close_price": None,
                 "low_52_week": None, "high_52_week": None,
@@ -132,7 +155,9 @@ def reconstruct_price_metrics(symbol: str, as_of: date | str) -> dict:
     # on that 366th day and a strict 365-day cutoff silently excluded it,
     # understating the window by one real trading day. Matching what's
     # actually used, not the nominal name.
-    window = hist[hist.index.date >= as_of - timedelta(days=366)]
+    _cut = as_of - timedelta(days=366)
+    _d = _dates(hist)
+    window = hist[_d >= _cut] if _d is not None else hist.iloc[0:0]
     low_52w = _safe(float(window["Low"].min())) if not window.empty else None
     high_52w = _safe(float(window["High"].max())) if not window.empty else None
 
@@ -161,7 +186,7 @@ def price_on_or_before(symbol: str, target: date | str) -> float | None:
     ).dropna(subset=["Close"])
     if hist.empty:
         return None
-    hist = hist[hist.index.date <= target]
+    hist = _on_or_before(hist, target)
     return _safe(float(hist["Close"].iloc[-1])) if not hist.empty else None
 
 
@@ -177,7 +202,7 @@ def reconstruct_market_context(as_of: date | str) -> dict:
         end=(as_of + timedelta(days=1)).isoformat(),
         interval="1d",
     ).dropna(subset=["Close"])
-    spy = spy[spy.index.date <= as_of]
+    spy = _on_or_before(spy, as_of)
 
     spy_latest = _safe(float(spy["Close"].iloc[-1])) if not spy.empty else None
     spy_20dma = _safe(float(spy["Close"].tail(20).mean())) if len(spy) >= 20 else None
@@ -197,7 +222,7 @@ def reconstruct_market_context(as_of: date | str) -> dict:
         end=(as_of + timedelta(days=1)).isoformat(),
         interval="1d",
     ).dropna(subset=["Close"])
-    vix_hist = vix_hist[vix_hist.index.date <= as_of]
+    vix_hist = _on_or_before(vix_hist, as_of)
     vix = _safe(float(vix_hist["Close"].iloc[-1])) if not vix_hist.empty else None
 
     return {"market_trend": market_trend, "vix": vix, "spy_latest": spy_latest}
@@ -217,7 +242,7 @@ def _trailing_eps_asof(symbol: str, as_of: date) -> float | None:
     if ed is None or ed.empty or "Reported EPS" not in ed.columns:
         return None
     ed = ed.dropna(subset=["Reported EPS"])
-    ed = ed[ed.index.date <= as_of].sort_index(ascending=False)
+    ed = _on_or_before(ed, as_of).sort_index(ascending=False)
     if len(ed) < 4:
         return None
     return _safe(float(ed["Reported EPS"].iloc[:4].sum()))
@@ -245,7 +270,10 @@ def _ttm_income_asof(symbol: str, as_of: date) -> dict | None:
     if income is None or income.empty or ed is None or ed.empty:
         return None
 
-    disclosure_dates = sorted(ed.index.date)
+    _ed_dates = _dates(ed)
+    if _ed_dates is None:
+        return None
+    disclosure_dates = sorted(_ed_dates)
     rows = []
     for period_end in sorted(income.columns, reverse=True):
         pe_date = period_end.date() if hasattr(period_end, "date") else period_end
@@ -293,7 +321,10 @@ def _quarterly_yoy_asof(symbol: str, as_of: date) -> dict:
     if q is None or q.empty or ed is None or ed.empty:
         return {"revenue_growth": None, "earnings_growth": None}
 
-    disclosure_dates = sorted(ed.index.date)
+    _ed_dates = _dates(ed)
+    if _ed_dates is None:
+        return {"revenue_growth": None, "earnings_growth": None}
+    disclosure_dates = sorted(_ed_dates)
 
     def _disclosed_on(period_end) -> date | None:
         pe_date = period_end.date() if hasattr(period_end, "date") else period_end

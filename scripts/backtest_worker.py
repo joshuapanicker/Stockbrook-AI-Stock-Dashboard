@@ -273,9 +273,12 @@ def main() -> int:
     market_cache: dict[date, dict] = {}
     logged = 0
     for i, (symbol, action, call_date, tier) in enumerate(plan, 1):
-        if call_date not in market_cache:
-            market_cache[call_date] = reconstruct_market_context(call_date)
         try:
+            # Inside the try: this is one shared fetch per date, so a
+            # transient yfinance failure here used to abort the whole
+            # batch instead of costing a single call.
+            if call_date not in market_cache:
+                market_cache[call_date] = reconstruct_market_context(call_date)
             status = run_one(symbol, action, call_date, market_cache[call_date], tier)
         except Exception as exc:
             status = f"ERROR: {exc}"
