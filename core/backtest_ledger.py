@@ -42,6 +42,7 @@ def _supabase():
 
 _REQUIRED_COLUMNS = ("criteria_passed", "unsourced_numbers",
                      "response_text", "universe_tier",
+                     "criteria_inputs",
                      "return_30d", "alpha_30d", "return_90d", "alpha_90d",
                      "return_180d", "alpha_180d",
                      "resolved_at", "resolve_attempts")
@@ -92,7 +93,8 @@ def log_backtest_call(symbol: str, action: str, decision: str,
                       criteria_passed: bool | None = None,
                       unsourced: list[str] | None = None,
                       response_text: str | None = None,
-                      universe_tier: str | None = None) -> bool:
+                      universe_tier: str | None = None,
+                      criteria_inputs: dict | None = None) -> bool:
     """Insert one backtest verdict. Returns True on success, False on a
     genuine failure (duplicates are treated as success — the row already
     exists, which is the desired end state either way)."""
@@ -118,6 +120,10 @@ def log_backtest_call(symbol: str, action: str, decision: str,
         # honest arithmetic after the fact.
         "response_text": response_text,
         "universe_tier": universe_tier,
+        # Everything evaluate_criteria() saw, so a different rule set can
+        # be scored against this scenario later with no refetch and no
+        # model call.
+        "criteria_inputs": criteria_inputs,
     }
     try:
         sb.table("ai_calls_backtest").insert(row).execute()

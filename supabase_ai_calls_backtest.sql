@@ -134,3 +134,20 @@ alter table ai_calls_backtest add column if not exists resolve_attempts int not 
 
 create index if not exists ai_calls_backtest_unresolved_idx
   on ai_calls_backtest (resolved_at) where resolved_at is null;
+
+-- ── Migration, 2026-09-29 ───────────────────────────────────────────────
+-- Store the exact inputs the criteria engine saw, so alternative rule
+-- sets can be scored against history WITHOUT refetching anything and
+-- without a single model call.
+--
+-- The measurement's own finding motivates this: the AI adds nothing over
+-- the deterministic screener, and the screener itself only matches the
+-- base rate -- so the rules are the thing worth experimenting on. Rule
+-- evaluation is deterministic, so a variant costs $0 in API spend; the
+-- only reason it wasn't free already is that the metrics behind each
+-- historical call weren't kept, forcing a yfinance refetch per row.
+--
+-- Shape: {"metrics": {...}, "market": {...}, "gain_pct": <float|null>} --
+-- exactly what evaluate_criteria() was handed, so a variant re-run is a
+-- pure function of this column plus the already-stored outcomes.
+alter table ai_calls_backtest add column if not exists criteria_inputs jsonb;

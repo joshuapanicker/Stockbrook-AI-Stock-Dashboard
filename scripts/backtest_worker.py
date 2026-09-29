@@ -176,6 +176,19 @@ def _filing_context_asof(symbol: str, as_of: date, criteria_result: dict,
     return block, best_meta
 
 
+def _jsonable(value):
+    """Plain JSON types only — yfinance hands back numpy scalars, which
+    the Postgres client will not serialise."""
+    if isinstance(value, dict):
+        return {k: _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (str, bool)) or value is None:
+        return value
+    if isinstance(value, (int, float)):
+        return value
+    item = getattr(value, "item", None)      # numpy scalar
+    return item() if callable(item) else str(value)
+
+
 def run_one(symbol: str, action: str, call_date: date, market: dict,
             tier: str) -> str:
     """Returns a short status string for logging; never raises — a bad
@@ -226,6 +239,8 @@ def run_one(symbol: str, action: str, call_date: date, market: dict,
         # the arm the AI has to beat to be worth its cost.
         criteria_passed=bool(criteria_result.get("passed")),
         unsourced=unsourced,
+        criteria_inputs=_jsonable({"metrics": metrics, "market": market,
+                                   "gain_pct": gain_pct}),
         response_text=text,
         universe_tier=tier,
     )
