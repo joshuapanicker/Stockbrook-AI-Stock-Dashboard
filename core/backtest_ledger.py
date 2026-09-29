@@ -22,7 +22,7 @@ instead of waiting weeks.
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 from core.track_record import HORIZONS, _resolve_row
@@ -41,7 +41,10 @@ def _supabase():
 
 
 _REQUIRED_COLUMNS = ("criteria_passed", "unsourced_numbers",
-                     "response_text", "universe_tier")
+                     "response_text", "universe_tier",
+                     "return_30d", "alpha_30d", "return_90d", "alpha_90d",
+                     "return_180d", "alpha_180d",
+                     "resolved_at", "resolve_attempts")
 
 
 def schema_ready() -> bool:
@@ -152,6 +155,69 @@ def _all_backtest_calls() -> list[dict]:
         return []
 
 
+_RESOLVED_FIELDS = tuple(f"{k}_{h}" for h in HORIZONS for k in ("return", "alpha"))
+
+# A symbol that no longer prices (delisted, renamed) will never resolve.
+# Without a cap it would be refetched on every pass, forever.
+_MAX_RESOLVE_ATTEMPTS = 3
+
+
+def _stored_resolution(row: dict) -> dict:
+    """The row with its STORED return/alpha fields promoted, no network.
+
+    Keys are only present when non-null, matching what _resolve_row
+    produces, so _score's "is this horizon resolved" check is unchanged.
+    """
+    out = {k: v for k, v in row.items() if k not in _RESOLVED_FIELDS}
+    for field in _RESOLVED_FIELDS:
+        value = row.get(field)
+        if value is not None:
+            out[field] = float(value)
+    return out
+
+
+def resolve_unresolved(limit: int = 200) -> tuple[int, int]:
+    """Compute and persist outcomes for rows that don't have them yet.
+
+    Returns (resolved, attempted). Called at the end of a worker run so
+    the backlog drains a batch at a time rather than being recomputed on
+    every read — historical prices don't change, so this is done once per
+    call and then never again.
+    """
+    sb = _supabase()
+    if not sb:
+        return (0, 0)
+    try:
+        rows = (sb.table("ai_calls_backtest").select("*")
+                .is_("resolved_at", "null")
+                .lt("resolve_attempts", _MAX_RESOLVE_ATTEMPTS)
+                .order("id").limit(limit).execute()).data or []
+    except Exception:
+        _log.exception("ai_calls_backtest unresolved fetch failed")
+        return (0, 0)
+
+    resolved_count = 0
+    for row in rows:
+        try:
+            filled = _resolve_row(row)
+        except Exception:
+            _log.exception("resolution failed for id=%s", row.get("id"))
+            filled = {}
+        patch: dict[str, Any] = {f: filled.get(f) for f in _RESOLVED_FIELDS}
+        patch["resolve_attempts"] = (row.get("resolve_attempts") or 0) + 1
+        # Only call it resolved once something actually came back. A
+        # transient fetch failure would otherwise freeze nulls in place
+        # as though they were the real answer.
+        if any(patch[f] is not None for f in _RESOLVED_FIELDS):
+            patch["resolved_at"] = datetime.now(timezone.utc).isoformat()
+            resolved_count += 1
+        try:
+            sb.table("ai_calls_backtest").update(patch).eq("id", row["id"]).execute()
+        except Exception:
+            _log.exception("resolution write failed for id=%s", row.get("id"))
+    return (resolved_count, len(rows))
+
+
 def _score(rows: list[dict], action: str, label: str) -> dict:
     """Win rate / return / alpha for one set of already-resolved calls.
 
@@ -217,7 +283,11 @@ def compute_backtest_record() -> dict:
     only shows up there may be that bias rather than the model.
     """
     all_rows = _all_backtest_calls()
-    resolved = [_resolve_row(c) for c in all_rows]
+    # Stored outcomes only — no price fetching. Re-resolving every row on
+    # each read had grown to seven minutes as the universe widened, which
+    # no API endpoint could serve. Rows still awaiting resolution are
+    # reported below rather than silently dropped.
+    resolved = [_stored_resolution(c) for c in all_rows]
 
     tiers = sorted({r.get("universe_tier") or "unknown" for r in resolved})
     by_tier = {
@@ -241,6 +311,7 @@ def compute_backtest_record() -> dict:
         "total_backtest_calls": len(all_rows),
         "ai_yes_calls": sum(1 for r in resolved if r.get("decision") == "YES"),
         "rows_with_baseline": with_baseline,
+        "unresolved_calls": sum(1 for r in all_rows if r.get("resolved_at") is None),
         "faithfulness": {
             "audited": len(audited),
             "with_unsourced_numbers": len(flagged),

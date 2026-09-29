@@ -106,3 +106,31 @@ alter table ai_calls_backtest add column if not exists universe_tier text;
 update ai_calls_backtest set universe_tier = 'legacy30' where universe_tier is null;
 create index if not exists ai_calls_backtest_tier_idx
   on ai_calls_backtest (universe_tier);
+
+-- ── Migration, 2026-09-28 ───────────────────────────────────────────────
+-- Store each call's resolved outcome instead of recomputing it forever.
+--
+-- compute_backtest_record() re-resolved every row on every read, and each
+-- resolution fetches price history per symbol. With the original 30-ticker
+-- list that was 30 cached fetches; the widened universe now spans over a
+-- thousand distinct tickers and grows daily, so a single read had reached
+-- SEVEN MINUTES. It could never have been served from an API endpoint.
+--
+-- Historical prices don't change, so a resolved horizon is final. (One
+-- caveat: yfinance returns split-adjusted series, so a split occurring
+-- after a call could shift a recomputed figure. Freezing the value at
+-- resolution time is therefore more stable than recomputing, not less.)
+--
+-- resolve_attempts bounds the retries: a delisted symbol never resolves,
+-- and without a cap it would be refetched on every pass forever.
+alter table ai_calls_backtest add column if not exists return_30d   numeric;
+alter table ai_calls_backtest add column if not exists alpha_30d    numeric;
+alter table ai_calls_backtest add column if not exists return_90d   numeric;
+alter table ai_calls_backtest add column if not exists alpha_90d    numeric;
+alter table ai_calls_backtest add column if not exists return_180d  numeric;
+alter table ai_calls_backtest add column if not exists alpha_180d   numeric;
+alter table ai_calls_backtest add column if not exists resolved_at  timestamptz;
+alter table ai_calls_backtest add column if not exists resolve_attempts int not null default 0;
+
+create index if not exists ai_calls_backtest_unresolved_idx
+  on ai_calls_backtest (resolved_at) where resolved_at is null;

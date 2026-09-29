@@ -55,7 +55,9 @@ if _env_file.exists():
                 os.environ.setdefault(_k.strip(), _v.strip())
 
 from core.analysis import _build_prompt, _build_retrieval_query, _parse_decision  # noqa: E402
-from core.backtest_ledger import already_tried, log_backtest_call, schema_ready  # noqa: E402
+from core.backtest_ledger import (  # noqa: E402
+    already_tried, log_backtest_call, resolve_unresolved, schema_ready,
+)
 from core.criteria import evaluate_criteria  # noqa: E402
 from core.filings import extract_section, get_recent_filings, _strip_html, _throttled_get  # noqa: E402
 from core.output_audit import unsourced_numbers  # noqa: E402
@@ -288,6 +290,13 @@ def main() -> int:
 
     print(f"\n{logged}/{len(plan)} new calls logged "
          f"(~${logged * 0.0033:.2f})")
+
+    # Resolve outcomes once, here, rather than recomputing them on every
+    # read. Bounded per run so the backlog drains over several days
+    # without risking the job's timeout.
+    done, tried = resolve_unresolved(limit=400)
+    if tried:
+        print(f"resolved {done}/{tried} pending outcomes")
     return 0
 
 

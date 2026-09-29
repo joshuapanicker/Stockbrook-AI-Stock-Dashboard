@@ -151,3 +151,40 @@ def test_universe_tiers_are_disjoint_and_cover_everything():
     assert not core & broad
     listed = set(json.loads((root / "data" / "universe.json").read_text())["symbols"])
     assert (core | broad) >= listed
+
+
+# ── stored resolution ───────────────────────────────────────────────────
+
+def test_stored_resolution_promotes_saved_returns():
+    """Reads must use the stored outcome, not refetch prices. Only
+    non-null horizons get keys, matching what live resolution produced —
+    _score treats a missing key as "not resolved yet"."""
+    from core.backtest_ledger import _stored_resolution
+    row = {"action": "sell", "symbol": "X", "return_30d": "0.12",
+           "alpha_30d": None, "return_90d": "-0.05"}
+    out = _stored_resolution(row)
+    assert out["return_30d"] == pytest.approx(0.12)   # numeric, not str
+    assert out["return_90d"] == pytest.approx(-0.05)
+    assert "alpha_30d" not in out                      # null stays absent
+    assert out["symbol"] == "X"
+
+
+def test_stored_resolution_feeds_score_unchanged():
+    """The whole point: stored values must score identically to
+    freshly-computed ones."""
+    from core.backtest_ledger import _stored_resolution
+    stored = [_stored_resolution({"action": "sell", "return_30d": "-0.20"}),
+              _stored_resolution({"action": "sell", "return_30d": "0.10"})]
+    result = _score(stored, "sell", "30d")
+    assert result["count"] == 2
+    assert result["win_rate"] == pytest.approx(0.5, abs=1e-4)
+    assert result["avg_return"] == pytest.approx(0.05, abs=1e-4)
+
+
+def test_unresolved_row_is_not_counted_as_a_zero_return():
+    """A row awaiting resolution has no return key at all. Treating it as
+    0.0 would drag every average toward nothing."""
+    from core.backtest_ledger import _stored_resolution
+    rows = [_stored_resolution({"action": "sell", "return_30d": "-0.20"}),
+            _stored_resolution({"action": "sell"})]
+    assert _score(rows, "sell", "30d")["count"] == 1
