@@ -161,6 +161,10 @@ _RESOLVED_FIELDS = tuple(f"{k}_{h}" for h in HORIZONS for k in ("return", "alpha
 # Without a cap it would be refetched on every pass, forever.
 _MAX_RESOLVE_ATTEMPTS = 3
 
+# Kept out of the headline summary: a survivorship-biased slice that would
+# quietly drag the default numbers. Still reported under by_tier.
+_EXCLUDED_FROM_DEFAULT = ("legacy30",)
+
 
 def _stored_resolution(row: dict) -> dict:
     """The row with its STORED return/alpha fields promoted, no network.
@@ -277,10 +281,18 @@ def compute_backtest_record() -> dict:
     an arm and that base rate — and the AI is only earning its cost if
     ai_yes beats rules_passed, since the rules run for free.
 
-    Also split by the universe tier each call was sampled from. The first
-    ~800 calls came from a fixed list of 30 mega-caps (recorded as
-    "legacy30"), which are large today because they rose — a finding that
-    only shows up there may be that bias rather than the model.
+    `summary` covers the CURRENT sampling design and deliberately leaves
+    out "legacy30" — the first ~800 calls, drawn from a fixed list of 30
+    mega-caps. Those names are large today because they rose, which drags
+    every sell result down: including them moved the headline 180-day
+    figure from 41% to 32%. A reader reaching for the obvious key should
+    not land on a sample already known to be biased, so legacy30 stays
+    available under `by_tier`, labelled, rather than blended into the
+    default.
+
+    The exclusion is a denylist, not an allowlist: any tier added later
+    counts toward `summary` automatically. An allowlist would silently
+    drop a new tier from the headline and nobody would notice.
     """
     all_rows = _all_backtest_calls()
     # Stored outcomes only — no price fetching. Re-resolving every row on
@@ -289,6 +301,8 @@ def compute_backtest_record() -> dict:
     # reported below rather than silently dropped.
     resolved = [_stored_resolution(c) for c in all_rows]
 
+    default_rows = [r for r in resolved
+                    if (r.get("universe_tier") or "unknown") not in _EXCLUDED_FROM_DEFAULT]
     tiers = sorted({r.get("universe_tier") or "unknown" for r in resolved})
     by_tier = {
         t: {
@@ -306,7 +320,9 @@ def compute_backtest_record() -> dict:
     flagged = [r for r in audited if r.get("unsourced_numbers")]
 
     return {
-        "summary": _summarize(resolved),
+        "summary": _summarize(default_rows),
+        "summary_calls": len(default_rows),
+        "summary_excludes": list(_EXCLUDED_FROM_DEFAULT),
         "by_tier": by_tier,
         "total_backtest_calls": len(all_rows),
         "ai_yes_calls": sum(1 for r in resolved if r.get("decision") == "YES"),

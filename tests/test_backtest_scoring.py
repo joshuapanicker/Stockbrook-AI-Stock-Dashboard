@@ -188,3 +188,28 @@ def test_unresolved_row_is_not_counted_as_a_zero_return():
     rows = [_stored_resolution({"action": "sell", "return_30d": "-0.20"}),
             _stored_resolution({"action": "sell"})]
     assert _score(rows, "sell", "30d")["count"] == 1
+
+
+# ── default summary excludes the biased slice ───────────────────────────
+
+def test_default_summary_excludes_legacy30():
+    """legacy30 is survivorship-biased and drags the headline figure.
+    A reader reaching for the obvious key must not land on it."""
+    from core.backtest_ledger import _EXCLUDED_FROM_DEFAULT, _summarize
+    rows = ([{"action": "sell", "decision": "YES", "universe_tier": "core",
+              "return_30d": -0.10}] * 2
+            + [{"action": "sell", "decision": "YES", "universe_tier": "legacy30",
+                "return_30d": 0.50}] * 8)
+    kept = [r for r in rows
+            if (r.get("universe_tier") or "unknown") not in _EXCLUDED_FROM_DEFAULT]
+    result = _summarize(kept)["sell_30d"]["ai_yes"]
+    assert result["count"] == 2          # the 8 legacy rows are gone
+    assert result["win_rate"] == 1.0     # not dragged to 0.2 by them
+
+
+def test_a_new_tier_counts_toward_the_default_automatically():
+    """Denylist, not allowlist: a tier added later must appear in the
+    headline rather than silently vanishing from it."""
+    from core.backtest_ledger import _EXCLUDED_FROM_DEFAULT
+    assert "smallcap_2027" not in _EXCLUDED_FROM_DEFAULT
+    assert "legacy30" in _EXCLUDED_FROM_DEFAULT
