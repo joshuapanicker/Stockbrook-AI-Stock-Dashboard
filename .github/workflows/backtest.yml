@@ -12,14 +12,18 @@ name: AI backtest ledger
 # (the same three values already in Railway's environment — nothing new
 # to generate, just copied over).
 #
-# Cost at the default --limit: ~200 calls * $0.0033 =~ $0.66/day,
-# ~$20/month. Change --limit below to tune volume; see
-# docs/rag-and-model-roadmap.md for how this figure was chosen.
+# Cost at the default --limit: ~200 calls * $0.0033 =~ $0.66 a run,
+# now ~$3/month on a weekly cadence. Change --limit below to tune volume.
 
 on:
   schedule:
-    - cron: "17 9 * * *"   # 09:17 UTC daily — an off-the-hour time, avoids the
-                           # top-of-hour pile-up other repos' crons queue at
+    # Weekly, not daily. The sell result this collects has converged: the
+    # AI, the free screener and the base rate sit within ~3pp of each
+    # other at every horizon, and the last ~400 calls moved the figures
+    # under 2pp. Daily collection was buying precision on a settled null
+    # result at ~$17/month. Monday 09:17 UTC — off the hour, to avoid the
+    # top-of-hour pile-up other repos' crons queue at.
+    - cron: "17 9 * * 1"
   workflow_dispatch:        # lets it be run manually from the Actions tab too
 
 jobs:
