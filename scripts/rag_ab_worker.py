@@ -17,12 +17,27 @@ Scenarios with no filing are SKIPPED, not run: there is nothing to
 withhold from arm B, so they carry no information about grounding and
 would only cost money.
 
+The first 479 pairs showed a second, much larger class of waste. Where
+the screener's thresholds are not met, both arms said NO on all 426 of
+them — not one disagreement. The filing can only move a verdict where
+the rules already fire, so 89% of the spend was buying guaranteed-
+identical NO/NO pairs. `--met-only` (the default) evaluates the
+criteria first, which costs network time but no money, and pays for a
+scenario only when it can actually say something. Same budget, roughly
+nine times the informative pairs.
+
+Because that changes what the sample is, agreement is reported per
+stratum rather than pooled: a pooled rate across batches drawn under
+different rules would move purely with the mix. The non-met stratum is
+not re-sampled because 0/426 settles it.
+
 Everything shared with the main worker (universe tiers, call-date
 windows, filing-excerpt construction) is imported from it rather than
 copied, so the two can't drift into testing subtly different things.
 
     py -3 scripts/rag_ab_worker.py --limit 5 --dry-run
     py -3 scripts/rag_ab_worker.py --limit 100     # ~$0.66 (2 calls each)
+    py -3 scripts/rag_ab_worker.py --limit 100 --all-scenarios   # unfiltered
 """
 
 from __future__ import annotations
@@ -71,7 +86,8 @@ from backtest_worker import (  # noqa: E402
 _ACTION = "sell"
 
 
-def run_pair(symbol: str, call_date: date, tier: str, market: dict) -> str:
+def run_pair(symbol: str, call_date: date, tier: str, market: dict,
+             met_only: bool = True) -> str:
     """Returns a short status line; never raises."""
     if already_tried(symbol, _ACTION, call_date):
         return "skip (already tried)"
@@ -85,6 +101,11 @@ def run_pair(symbol: str, call_date: date, tier: str, market: dict) -> str:
                 if buy_price else None)
 
     criteria_result = evaluate_criteria(_ACTION, metrics, market, gain_pct=gain_pct)
+    if met_only and not criteria_result.get("passed"):
+        # Free to find out, and worth finding out: both arms said NO on
+        # every one of the 426 non-met scenarios sampled so far.
+        return "skip (threshold not met)"
+
     filing_ctx, filing_meta = _filing_context_asof(
         symbol, call_date, criteria_result, _ACTION)
     if not filing_ctx:
@@ -133,9 +154,19 @@ def run_pair(symbol: str, call_date: date, tier: str, market: dict) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=20,
-                    help="scenarios (each costs two model calls)")
+                    help="pairs to LOG (each costs two model calls); free "
+                         "skips don't count against it")
+    ap.add_argument("--all-scenarios", action="store_true",
+                    help="also pay for scenarios that miss the screener's "
+                         "thresholds, where both arms have always agreed")
+    ap.add_argument("--max-draws", type=int, default=0,
+                    help="stop after this many scenarios examined "
+                         "(default: 40x limit, enough headroom for the "
+                         "~11%% that meet thresholds)")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
+    met_only = not args.all_scenarios
+    max_draws = args.max_draws or args.limit * (40 if met_only else 3)
 
     if not args.dry_run:
         if not os.getenv("ANTHROPIC_API_KEY"):
@@ -148,37 +179,48 @@ def main() -> int:
 
     universe = _load_universe()
     random.seed()
-    plan = []
-    for _ in range(args.limit):
+
+    def draw() -> tuple[str, date, str]:
         tier = random.choices(list(_TIER_WEIGHTS),
                               weights=list(_TIER_WEIGHTS.values()))[0]
-        plan.append((random.choice(universe[tier]),
-                     _random_call_dates(1, _SELL_WINDOW_DAYS)[0], tier))
+        return (random.choice(universe[tier]),
+                _random_call_dates(1, _SELL_WINDOW_DAYS)[0], tier)
 
-    print(f"{len(plan)} scenarios, 2 calls each "
-          f"(~${len(plan) * 2 * 0.0033:.2f} if none skipped)\n")
+    print(f"target {args.limit} logged pairs, 2 calls each "
+          f"(~${args.limit * 2 * 0.0033:.2f}); "
+          f"{'threshold-met only' if met_only else 'all scenarios'}, "
+          f"max {max_draws} draws\n")
     if args.dry_run:
-        for symbol, call_date, tier in plan:
+        for _ in range(min(args.limit, 20)):
+            symbol, call_date, tier = draw()
             print(f"  {symbol:<6} {call_date}  {tier}")
         return 0
 
     market_cache: dict[date, dict] = {}
-    logged = flips = 0
-    for i, (symbol, call_date, tier) in enumerate(plan, 1):
+    logged = flips = draws = 0
+    while logged < args.limit and draws < max_draws:
+        draws += 1
+        symbol, call_date, tier = draw()
         try:
             if call_date not in market_cache:
                 market_cache[call_date] = reconstruct_market_context(call_date)
-            status = run_pair(symbol, call_date, tier, market_cache[call_date])
+            status = run_pair(symbol, call_date, tier, market_cache[call_date],
+                              met_only=met_only)
         except Exception as exc:
             status = f"ERROR: {exc}"
         if status.startswith("logged"):
             logged += 1
             if "FLIP" in status:
                 flips += 1
-        print(f"[{i}/{len(plan)}] {symbol:<6} {call_date} {tier:<5} {status}",
-              flush=True)
+            print(f"[{logged}/{args.limit} @draw {draws}] {symbol:<6} "
+                  f"{call_date} {tier:<5} {status}", flush=True)
+        elif status.startswith("ERROR") or status.startswith("LOG FAILED"):
+            print(f"[draw {draws}] {symbol:<6} {call_date} {tier:<5} {status}",
+                  flush=True)
 
-    print(f"\n{logged}/{len(plan)} pairs logged, {flips} verdict flips")
+    print(f"\n{logged} pairs logged from {draws} draws, {flips} verdict flips")
+    if logged < args.limit:
+        print(f"stopped at the {max_draws}-draw cap short of {args.limit}")
     done, tried = resolve_unresolved(limit=400)
     if tried:
         print(f"resolved {done}/{tried} pending outcomes")

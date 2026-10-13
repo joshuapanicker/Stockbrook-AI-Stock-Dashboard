@@ -24,6 +24,7 @@ power.
 from __future__ import annotations
 
 import logging
+import math
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -148,6 +149,44 @@ def resolve_unresolved(limit: int = 200) -> tuple[int, int]:
     return (resolved, len(rows))
 
 
+def _paired_yes_test(subset: list[dict]) -> dict:
+    """McNemar's test on the one thing that is actually paired: whether
+    each arm said YES on the same scenario.
+
+    The obvious test — two proportions, pooled standard error — is wrong
+    here and badly understates the evidence. It treats the arms as
+    independent samples when they are the same scenarios twice, so all
+    the agreement counts as noise. An earlier read of this effect used
+    that test and called +24pp at 1.8 sigma "suggestive"; the paired test
+    on the same data was already well past significance. Only the
+    scenarios where the arms differ carry information, and McNemar uses
+    exactly those.
+    """
+    n = len(subset)
+    if not n:
+        return {"n": 0}
+    g_yes = sum(1 for r in subset if r["decision_grounded"] == "YES")
+    u_yes = sum(1 for r in subset if r["decision_ungrounded"] == "YES")
+    # Discordant pairs: b = filing created a YES, c = filing removed one.
+    b = sum(1 for r in subset if r["decision_grounded"] == "YES"
+            and r["decision_ungrounded"] != "YES")
+    c = sum(1 for r in subset if r["decision_grounded"] != "YES"
+            and r["decision_ungrounded"] == "YES")
+    out = {
+        "n": n,
+        "grounded_yes": g_yes, "grounded_yes_rate": round(g_yes / n, 4),
+        "ungrounded_yes": u_yes, "ungrounded_yes_rate": round(u_yes / n, 4),
+        "effect_pp": round((g_yes - u_yes) / n, 4),
+        "discordant_to_yes": b, "discordant_to_no": c,
+    }
+    if b + c:
+        # SE of the paired difference depends only on the discordant count.
+        se = math.sqrt(b + c) / n
+        out["se_pp"] = round(se, 4)
+        out["z"] = round(((g_yes - u_yes) / n) / se, 2)
+    return out
+
+
 def compute_rag_ab() -> dict:
     """What the filing excerpt actually changed.
 
@@ -190,15 +229,31 @@ def compute_rag_ab() -> dict:
         seen = [r for r in rows if r.get(field) is not None]
         return round(sum(1 for r in seen if r[field]) / len(seen), 4) if seen else None
 
+    def stratum(sub: list[dict]) -> dict:
+        same = sum(1 for r in sub
+                   if r["decision_grounded"] == r["decision_ungrounded"])
+        return {"agreement_rate": round(same / len(sub), 4) if sub else None,
+                "disagreed": len(sub) - same, **_paired_yes_test(sub)}
+
+    met = [r for r in rows if r.get("criteria_passed")]
+    not_met = [r for r in rows if not r.get("criteria_passed")]
+
     return {
         "pairs": len(rows),
+        # Pooled, and only safe to read as a description of this sample:
+        # the two strata behave completely differently and batches drawn
+        # under --met-only shift the mix, so the pooled rate moves with
+        # sampling rather than with anything about RAG. Read `strata`.
         "agreement": {
             "same_verdict": len(agree),
             "rate": round(len(agree) / len(rows), 4),
             "disagreed": len(disagree),
             "filing_flipped_to_yes": flipped_to_yes,
             "filing_flipped_to_no": len(disagree) - flipped_to_yes,
+            "pooled_rate_depends_on_sampling": True,
         },
+        "strata": {"threshold_met": stratum(met),
+                   "threshold_not_met": stratum(not_met)},
         "summary": summary,
         "unsourced_rate": {
             "grounded": flag_rate("unsourced_grounded"),
