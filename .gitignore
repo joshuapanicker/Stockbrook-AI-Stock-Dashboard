@@ -62,3 +62,6 @@ referenceWebsites/
 .claude-flow/
 .claude/
 ruvector.db
+
+# Personal interview prep (kept local, never committed)
+AMAZON_LP_STUDY_GUIDE.md

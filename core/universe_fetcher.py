@@ -21,6 +21,7 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 import gc
+import logging
 import math
 import os
 import threading
@@ -35,6 +36,8 @@ from core.universe_cache import (
     upsert_stock,
 )
 from core.universe_symbols import refresh_universe_symbols
+
+_log = logging.getLogger("stockbrook")
 
 # Tunables (env-overridable for the hosted deployment). Defaults are sized for
 # a 512MB container: small batches keep each yf.download() DataFrame tiny and
@@ -87,6 +90,30 @@ _last_request_start = 0.0
 # When Yahoo rate-limits us, all workers back off until this timestamp
 _backoff_until = 0.0
 
+# Consecutive fetches that came back with nothing usable.
+#
+# This exists because the exception-based detection below cannot see the
+# failure that actually took production down (2026-11-11). When Yahoo
+# breaks the crumb handshake, `yf.download()` does NOT raise — it prints
+# "HTTP Error 401 ... Invalid Crumb" to stderr and returns an empty frame,
+# and `ticker.info` returns {} rather than raising. So every `except`
+# clause here stayed cold, `_note_rate_limit` was never called, and the
+# fetcher span at REQ_INTERVAL (~8 requests/second) for hours against an
+# endpoint that could not succeed. That storm starved uvicorn's event loop
+# until the API stopped answering at all — the server was up, accepting
+# TCP, and never responding.
+#
+# The lesson: a failure that arrives as an empty success is invisible to
+# error handling. Detect it by OUTCOME. An empty batch might be one bad
+# symbol; _FAILURE_TRIP in a row is Yahoo refusing us, and the only safe
+# response is to stop asking for a while.
+_consecutive_failures = 0
+_FAILURE_TRIP = int(os.getenv("UNIVERSE_FAILURE_TRIP", "5"))
+# Escalating, so a persistent outage costs a handful of requests per hour
+# rather than thousands. Yahoo's crumb breakage has lasted ~20 min at the
+# short end and much longer at the worst.
+_COOLDOWN_LADDER = (60.0, 300.0, 900.0, 1800.0)
+
 # Progress tracking (read by the API for status endpoint)
 _progress = {"fetched": 0, "total": 0, "running": False, "last_run": None}
 
@@ -119,6 +146,35 @@ def _note_rate_limit(seconds: float = 30.0) -> None:
     global _backoff_until
     with _throttle_lock:
         _backoff_until = max(_backoff_until, time.time() + seconds)
+
+
+def _note_success() -> None:
+    """A fetch returned real data — clear the failure streak."""
+    global _consecutive_failures
+    with _throttle_lock:
+        _consecutive_failures = 0
+
+
+def _note_empty_result(what: str) -> None:
+    """A fetch 'succeeded' but produced nothing usable.
+
+    Called where yfinance returns empty instead of raising, which is the
+    shape the 401/crumb failure actually takes. Trips a cooldown once the
+    streak is long enough to rule out a handful of dead tickers.
+    """
+    global _consecutive_failures
+    with _throttle_lock:
+        _consecutive_failures += 1
+        streak = _consecutive_failures
+    if streak < _FAILURE_TRIP:
+        return
+    rung = min((streak - _FAILURE_TRIP) // _FAILURE_TRIP, len(_COOLDOWN_LADDER) - 1)
+    cooldown = _COOLDOWN_LADDER[rung]
+    _note_rate_limit(cooldown)
+    _log.warning(
+        "universe fetcher: %d consecutive empty results (%s) — backing off %.0fs. "
+        "Usually Yahoo refusing this IP (crumb/401); yfinance reports it as "
+        "empty data rather than an exception.", streak, what, cooldown)
 
 
 # Yahoo periodically breaks yfinance's crumb/cookie handshake (an unresolved,
@@ -158,6 +214,9 @@ def _fetch_price_batch(symbols: list[str]) -> dict[str, dict]:
         )
 
         if data.empty:
+            # Not an error as far as yfinance is concerned — this is the
+            # shape a 401/crumb refusal arrives in. Count it.
+            _note_empty_result("price batch returned an empty frame")
             return results
 
         for symbol in symbols:
@@ -205,6 +264,13 @@ def _fetch_price_batch(symbols: list[str]) -> dict[str, dict]:
         if _is_auth_or_rate_limited(str(e)[:200]):
             _note_rate_limit(300.0)
 
+    # A batch that parsed to nothing is the same signal as an empty frame:
+    # the request "worked" and produced no data.
+    if symbols and not results:
+        _note_empty_result("price batch parsed to zero symbols")
+    elif results:
+        _note_success()
+
     return results
 
 
@@ -227,6 +293,18 @@ def _fetch_one_info(symbol: str, price_data: dict[str, dict]) -> None:
             price = _safe(fi.get("lastPrice") or fi.get("regularMarketPrice"))
             if price:
                 base["close_price"] = price
+
+        # `info` comes back as {} when Yahoo refuses the crumb handshake —
+        # no exception, just nothing. Writing that as a clean row would
+        # both poison the cache with all-None metrics and hide the outage,
+        # so treat "no fundamentals AND no price" as the failure it is.
+        if not info and not base.get("close_price"):
+            _note_empty_result(f"info empty for {symbol}")
+            upsert_stock({"symbol": symbol}, error="empty response from provider")
+            with _lock:
+                _progress["fetched"] += 1
+            return
+        _note_success()
 
         metrics = {
             **base,
