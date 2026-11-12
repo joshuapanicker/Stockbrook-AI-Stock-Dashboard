@@ -1,6 +1,10 @@
 fastapi
 uvicorn[standard]
-yfinance>=1.7.0
+# Pinned, not floating. `>=1.7.0` meant Railway silently moved to 1.8.0
+# while local dev sat on 1.2.2 — so local testing was exercising different
+# provider code than production ran, and a redeploy could change market
+# data behaviour with no commit to point at. Bump deliberately.
+yfinance==1.8.0
 anthropic
 pydantic>=2.0
 supabase

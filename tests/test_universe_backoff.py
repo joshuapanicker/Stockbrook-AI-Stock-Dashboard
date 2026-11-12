@@ -123,3 +123,48 @@ def test_empty_info_counts_toward_the_breaker():
         for _ in range(uf._FAILURE_TRIP):
             uf._fetch_one_info("AAPL", {})
     assert _backoff_active()
+
+
+# --- recovery from a poisoned crumb -----------------------------------
+#
+# Backing off is necessary but not sufficient. yfinance caches the crumb
+# token and returns it forever once set, and it assigns the response body
+# to that cache BEFORE checking whether the response was a 429 — so a
+# rate-limited crumb fetch leaves the literal string "Too Many Requests"
+# installed as the crumb, and every later request 401s for the life of the
+# process. Present in 1.2.2 and 1.8.0 alike. Without the reset below, a
+# cooldown just expires into the same failure.
+
+
+def test_reset_clears_a_poisoned_crumb():
+    from yfinance.data import YfData
+    ydata = YfData()
+    ydata._crumb = "Too Many Requests"
+    ydata._cookie = "stale"
+
+    assert "cleared" in uf._reset_provider_session()
+    assert ydata._crumb is None, (
+        "a cached crumb survives for the life of the process, so failing to "
+        "clear it means the backoff expires straight back into 401s")
+    assert ydata._cookie is None
+
+
+def test_tripping_the_breaker_also_clears_the_crumb():
+    """The two halves have to fire together: cooling down without clearing
+    the crumb recovers nothing."""
+    from yfinance.data import YfData
+    ydata = YfData()
+    ydata._crumb = "Too Many Requests"
+
+    with patch.object(uf.yf, "download", return_value=pd.DataFrame()):
+        for _ in range(uf._FAILURE_TRIP):
+            uf._fetch_price_batch(["AAPL"])
+
+    assert _backoff_active()
+    assert ydata._crumb is None
+
+
+def test_reset_survives_yfinance_internals_changing():
+    """Recovery must never raise, however the library is shaped."""
+    with patch.dict("sys.modules", {"yfinance.data": None}):
+        assert isinstance(uf._reset_provider_session(), str)

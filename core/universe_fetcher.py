@@ -148,6 +148,46 @@ def _note_rate_limit(seconds: float = 30.0) -> None:
         _backoff_until = max(_backoff_until, time.time() + seconds)
 
 
+def _reset_provider_session() -> str:
+    """Throw away yfinance's cached crumb so the next call mints a fresh one.
+
+    Without this, backing off is not enough to recover. yfinance caches the
+    crumb token and `_get_crumb_basic` short-circuits on it forever:
+
+        crumb_response = self._session.get(**get_args)
+        self._crumb = crumb_response.text        # cached BEFORE validation
+        if crumb_response.status_code == 429 ...:
+            raise YFRateLimitError()             # crumb already poisoned
+
+    When Yahoo rate-limits the crumb endpoint, the literal string
+    "Too Many Requests" becomes the cached crumb, and because the method
+    opens with `if self._crumb is not None: return self._crumb`, every
+    later request sends that garbage and gets 401 Invalid Crumb — for the
+    life of the process. That is the 2026-11-11 outage: our own request
+    storm earned the 429, and the poisoned crumb made it permanent.
+    Verified present in both 1.2.2 and 1.8.0, so it is not version-specific.
+
+    These are private attributes of a third-party library, so every step is
+    defensive and `tests/test_universe_backoff.py` asserts the reset still
+    works — if yfinance renames them, that test fails rather than this
+    silently becoming a no-op.
+    """
+    try:
+        from yfinance.data import YfData
+        ydata = YfData()  # singleton; no-arg call returns it without re-init
+        lock = getattr(ydata, "_cookie_lock", None)
+        if lock is not None:
+            with lock:
+                ydata._crumb = None
+                ydata._cookie = None
+        else:
+            ydata._crumb = None
+            ydata._cookie = None
+        return "cleared cached crumb and cookie"
+    except Exception as exc:  # noqa: BLE001 - never let recovery raise
+        return f"could not clear crumb ({type(exc).__name__})"
+
+
 def _note_success() -> None:
     """A fetch returned real data — clear the failure streak."""
     global _consecutive_failures
@@ -171,10 +211,15 @@ def _note_empty_result(what: str) -> None:
     rung = min((streak - _FAILURE_TRIP) // _FAILURE_TRIP, len(_COOLDOWN_LADDER) - 1)
     cooldown = _COOLDOWN_LADDER[rung]
     _note_rate_limit(cooldown)
+    # Backing off alone cannot fix a poisoned crumb — it is cached for the
+    # life of the process, so without this the cooldown just expires into
+    # the same 401. Clear it so the retry after the cooldown starts clean.
+    reset = _reset_provider_session()
     _log.warning(
-        "universe fetcher: %d consecutive empty results (%s) — backing off %.0fs. "
-        "Usually Yahoo refusing this IP (crumb/401); yfinance reports it as "
-        "empty data rather than an exception.", streak, what, cooldown)
+        "universe fetcher: %d consecutive empty results (%s) — backing off "
+        "%.0fs; %s. yfinance reports this failure as empty data rather than "
+        "an exception, so it is detected by outcome.",
+        streak, what, cooldown, reset)
 
 
 # Yahoo periodically breaks yfinance's crumb/cookie handshake (an unresolved,
